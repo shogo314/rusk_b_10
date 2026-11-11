@@ -1,0 +1,207 @@
+//! 添字付き走査、2列の同時走査、逆向き走査です。
+
+/// 添字と要素を組にして返す遅延走査状態です。
+extern type<I, T> Enumerated {
+    cpp_name: "RuskEnumerated<{I}>",
+    representation: "iterator<Tuple<Int,T>>",
+    retains: "source:I",
+}
+
+/// 0から始まる添字と要素の組を遅延して返します。
+extern fn enumerate<S, I, T>(source: S) -> Enumerated<I, T> {
+    effects: "read_fresh",
+    code: "Obj<@{Enumerated<I,T>}> @{fn}(Obj<@{S}> source, Loc loc) { [[maybe_unused]] constexpr bool writes = @{writes __iter_next__(I)->T}; auto cursor = @{boxed_call __iter__(S)->I via (0) into return.source}(source, loc); return make_obj<@{Enumerated<I,T>}>({cursor, 0}); }",
+}
+
+/// 指定した添字から始めます。要素を取り出すたびに添字が1増えます。
+extern fn enumerate<S, I, T>(source: S, start: Int) -> Enumerated<I, T> {
+    effects: "read_fresh",
+    code: "Obj<@{Enumerated<I,T>}> @{fn}(Obj<@{S}> source, Obj<@{Int}> start, Loc loc) { [[maybe_unused]] constexpr bool writes = @{writes __iter_next__(I)->T}; auto index = *start; auto cursor = @{boxed_call __iter__(S)->I via (0) into return.source}(source, loc); return make_obj<@{Enumerated<I,T>}>({cursor, index}); }",
+}
+
+extern fn __iter__<I, T>(it: Enumerated<I, T>) -> Enumerated<I, T> {
+    effects: "read_fresh",
+    aliases: "return=0",
+    code: "Obj<@{Enumerated<I,T>}> @{fn}(Obj<@{Enumerated<I,T>}> it, Loc) { return it; }",
+}
+
+extern fn __iter_has_next__<I, T>(it: Enumerated<I, T>) -> Bool {
+    code: "Obj<bool> @{fn}(Obj<@{Enumerated<I,T>}> it, Loc loc) { return make_obj<bool>(rusk_enumerate_ready(it, loc, @{boxed_call __iter_has_next__(I)->Bool})); }",
+}
+
+extern fn __iter_next__<I, T>(it: Enumerated<I, T>) -> (Int, T) {
+    code: "Obj<@{Tuple<Int,T>}> @{fn}(Obj<@{Enumerated<I,T>}> it, Loc loc) { if (!rusk_enumerate_ready(it, loc, @{boxed_call __iter_has_next__(I)->Bool})) fail(loc, \"iterator exhausted\"); auto index = rusk_enumerate_index(it, loc); auto value = @{boxed_call __iter_next__(I)->T}(it->source, loc); rusk_guard_iter(it, loc); return make_obj<@{Tuple<Int,T>}>({make_obj<@{Int}>(index), value}); }",
+}
+
+/// 現在の添字と走査元の進行状態をコピーします。
+extern fn copy<I, T>(it: Enumerated<I, T>) -> Enumerated<I, T> {
+    effects: "read_fresh",
+    code: "Obj<@{Enumerated<I,T>}> @{fn}(Obj<@{Enumerated<I,T>}> it, Loc loc) { auto source = @{owned_call copy(I)->I via (0.source) into return.source}(it->source, loc); return make_obj<@{Enumerated<I,T>}>({source, it->index, it->ready, it->finished, it->overflow}); }",
+}
+
+/// 左右2列の対応する要素を組にして返す遅延走査状態です。
+extern type<I, J, A, B> Zipped {
+    cpp_name: "RuskZipped<{I},{J}>",
+    representation: "iterator<Tuple<A,B>>",
+    retains: "left:I;right:J",
+}
+
+/// 2列を左から順に調べ、対応する要素を組にします。長さが異なれば走査中にエラーです。
+extern fn zip<S, U, I, J, A, B>(left: S, right: U) -> Zipped<I, J, A, B> {
+    effects: "checked_read_fresh",
+    code: "Obj<@{Zipped<I,J,A,B>}> @{fn}(Obj<@{S}> left, Obj<@{U}> right, Loc loc) { [[maybe_unused]] constexpr bool lw = @{writes __iter_next__(I)->A}, rw = @{writes __iter_next__(J)->B}; auto lhs = @{boxed_call __iter__(S)->I via (0) into return.left}(left, loc); auto rhs = @{boxed_call __iter__(U)->J via (1) into return.right}(right, loc); return rusk_zip_sources(std::move(lhs), std::move(rhs), loc); }",
+}
+
+extern fn __iter__<I, J, A, B>(it: Zipped<I, J, A, B>) -> Zipped<I, J, A, B> {
+    effects: "read_fresh",
+    aliases: "return=0",
+    code: "Obj<@{Zipped<I,J,A,B>}> @{fn}(Obj<@{Zipped<I,J,A,B>}> it, Loc) { return it; }",
+}
+
+extern fn __iter_has_next__<I, J, A, B>(it: Zipped<I, J, A, B>) -> Bool {
+    code: "Obj<bool> @{fn}(Obj<@{Zipped<I,J,A,B>}> it, Loc loc) { return make_obj<bool>(rusk_zip_ready(it, loc, @{boxed_call __iter_has_next__(I)->Bool}, @{boxed_call __iter_has_next__(J)->Bool})); }",
+}
+
+extern fn __iter_next__<I, J, A, B>(it: Zipped<I, J, A, B>) -> (A, B) {
+    code: "Obj<@{Tuple<A,B>}> @{fn}(Obj<@{Zipped<I,J,A,B>}> it, Loc loc) { if (!rusk_zip_ready(it, loc, @{boxed_call __iter_has_next__(I)->Bool}, @{boxed_call __iter_has_next__(J)->Bool})) fail(loc, \"iterator exhausted\"); auto left = @{boxed_call __iter_next__(I)->A}(it->left, loc); rusk_guard_iter(it, loc); auto right = @{boxed_call __iter_next__(J)->B}(it->right, loc); rusk_guard_iter(it, loc); it->ready = false; return make_obj<@{Tuple<A,B>}>({left, right}); }",
+}
+
+/// 左右の進行状態をコピーします。
+extern fn copy<I, J, A, B>(it: Zipped<I, J, A, B>) -> Zipped<I, J, A, B> {
+    effects: "read_fresh",
+    code: "Obj<@{Zipped<I,J,A,B>}> @{fn}(Obj<@{Zipped<I,J,A,B>}> it, Loc loc) { auto left = @{owned_call copy(I)->I via (0.left) into return.left}(it->left, loc); auto right = @{owned_call copy(J)->J via (0.right) into return.right}(it->right, loc); return make_obj<@{Zipped<I,J,A,B>}>({left, right, it->ready, it->finished}); }",
+}
+
+extern fn __iter__(it: RangeIter) -> RangeIter {
+    effects: "read_fresh",
+    aliases: "return=0",
+    cpp_name: "rusk_iter_range_cursor",
+    code: "Obj<RuskRangeIter> rusk_iter_range_cursor(Obj<RuskRangeIter> it, Loc) { return it; }",
+}
+
+extern fn __iter__<T>(it: Iter<Vec<T>>) -> Iter<Vec<T>> {
+    effects: "read_fresh",
+    aliases: "return=0",
+    code: "Obj<@{Iter<Vec<T>>}> @{fn}(Obj<@{Iter<Vec<T>>}> it, Loc) { return it; }",
+}
+
+/// 配列を末尾から走査する状態です。
+extern type<T> ReverseVecIter {
+    cpp_name: "RuskReverseVecIter<{T}>",
+    representation: "iterator<T>",
+    retains: "owner:Vec<T>",
+}
+
+/// 配列を末尾から走査します。要素を共有し、走査中の構造変更を検出します。
+extern fn reversed<T>(source: Vec<T>) -> ReverseVecIter<T> {
+    effects: "read_fresh",
+    aliases: "return.owner=0",
+    code: "inline Obj<@{ReverseVecIter<T>}> @{fn}(Obj<@{Vec<T>}> source, Loc) { return make_obj<@{ReverseVecIter<T>}>({source, source->size(), source->version}); }",
+}
+
+extern fn __iter__<T>(it: ReverseVecIter<T>) -> ReverseVecIter<T> {
+    effects: "read_fresh",
+    aliases: "return=0",
+    code: "inline Obj<@{ReverseVecIter<T>}> @{fn}(Obj<@{ReverseVecIter<T>}> it, Loc) { return it; }",
+}
+
+extern fn __iter_has_next__<T>(it: ReverseVecIter<T>) -> Bool {
+    effects: "checked_read_fresh",
+    code: "inline Obj<bool> @{fn}(Obj<@{ReverseVecIter<T>}> it, Loc loc) { rusk_guard_iter(it, loc); return make_obj<bool>(it->next != 0); }",
+}
+
+extern fn __iter_next__<T>(it: ReverseVecIter<T>) -> T {
+    return_abi: "object",
+    effects: "checked_mutate_fresh",
+    aliases: "return=0.owner.element",
+    code: "inline Obj<@{T}> @{fn}(Obj<@{ReverseVecIter<T>}> it, Loc loc) { return rusk_reverse_next(it, loc); }",
+}
+
+/// 現在の逆向き走査位置をコピーします。
+extern fn copy<T>(it: ReverseVecIter<T>) -> ReverseVecIter<T> {
+    effects: "read_fresh",
+    aliases: "return.owner=0.owner",
+    code: "inline Obj<@{ReverseVecIter<T>}> @{fn}(Obj<@{ReverseVecIter<T>}> it, Loc) { return make_obj<@{ReverseVecIter<T>}>(*it); }",
+}
+
+/// ASCII文字列を末尾から走査する状態です。
+extern type ReverseStrIter {
+    cpp_name: "RuskReverseStrIter",
+    representation: "iterator<Char>",
+    retains: "owner:Str",
+}
+
+/// 文字列を末尾から走査し、文字を共有します。走査状態が生きている間は文字列の長さを変えられません。
+extern fn reversed(source: Str) -> ReverseStrIter {
+    effects: "read_fresh",
+    aliases: "return.owner=0",
+    cpp_name: "rusk_reversed_reverse_str",
+    code: "inline Obj<RuskReverseStrIter> rusk_reversed_reverse_str(Obj<std::string> source, Loc) { auto size = source->size(); return make_obj<RuskReverseStrIter>({rusk_borrow_string(source), size, size}); }",
+}
+
+extern fn __iter__(it: ReverseStrIter) -> ReverseStrIter {
+    effects: "read_fresh",
+    aliases: "return=0",
+    cpp_name: "rusk_iter_reverse_str",
+    code: "inline Obj<RuskReverseStrIter> rusk_iter_reverse_str(Obj<RuskReverseStrIter> it, Loc) { return it; }",
+}
+
+extern fn __iter_has_next__(it: ReverseStrIter) -> Bool {
+    effects: "checked_read_fresh",
+    cpp_name: "rusk_iter_has_next_reverse_str",
+    code: "inline Obj<bool> rusk_iter_has_next_reverse_str(Obj<RuskReverseStrIter> it, Loc loc) { rusk_guard_iter(it, loc); return make_obj<bool>(it->next != 0); }",
+}
+
+extern fn __iter_next__(it: ReverseStrIter) -> Char {
+    effects: "checked_mutate_fresh",
+    aliases: "return=0.owner.element",
+    cpp_name: "rusk_iter_next_reverse_str",
+    code: "inline Obj<char> rusk_iter_next_reverse_str(Obj<RuskReverseStrIter> it, Loc loc) { return rusk_reverse_next(it, loc); }",
+}
+
+/// 現在の逆向き走査位置をコピーします。
+extern fn copy(it: ReverseStrIter) -> ReverseStrIter {
+    effects: "read_fresh",
+    aliases: "return.owner=0.owner",
+    cpp_name: "rusk_copy_reverse_str",
+    code: "inline Obj<RuskReverseStrIter> rusk_copy_reverse_str(Obj<RuskReverseStrIter> it, Loc) { return make_obj<RuskReverseStrIter>(*it); }",
+}
+
+/// 半開区間を末尾から走査する状態です。
+extern type ReverseRangeIter {
+    cpp_name: "RuskReverseRangeIter",
+    representation: "iterator<Int>",
+}
+
+/// 半開区間を終端の1つ前から始点に向かって走査します。空の区間は空のままです。
+extern fn reversed(source: Range) -> ReverseRangeIter {
+    effects: "read_fresh",
+    cpp_name: "rusk_reversed_reverse_range",
+    code: "inline Obj<RuskReverseRangeIter> rusk_reversed_reverse_range(Obj<RuskRange> source, Loc) { return make_obj<RuskReverseRangeIter>({source->end, source->start}); }",
+}
+
+extern fn __iter__(it: ReverseRangeIter) -> ReverseRangeIter {
+    effects: "read_fresh",
+    aliases: "return=0",
+    cpp_name: "rusk_iter_reverse_range",
+    code: "inline Obj<RuskReverseRangeIter> rusk_iter_reverse_range(Obj<RuskReverseRangeIter> it, Loc) { return it; }",
+}
+
+extern fn __iter_has_next__(it: ReverseRangeIter) -> Bool {
+    effects: "read_fresh",
+    cpp_name: "rusk_iter_has_next_reverse_range",
+    code: "inline Obj<bool> rusk_iter_has_next_reverse_range(Obj<RuskReverseRangeIter> it, Loc) { return make_obj<bool>(it->next > it->start); }",
+}
+
+extern fn __iter_next__(it: ReverseRangeIter) -> Int {
+    effects: "checked_mutate_fresh",
+    cpp_name: "rusk_iter_next_reverse_range",
+    code: "inline Obj<std::int64_t> rusk_iter_next_reverse_range(Obj<RuskReverseRangeIter> it, Loc loc) { return make_obj<std::int64_t>(rusk_reverse_next(it, loc)); }",
+}
+
+/// 現在の逆向き走査位置をコピーします。
+extern fn copy(it: ReverseRangeIter) -> ReverseRangeIter {
+    effects: "read_fresh",
+    cpp_name: "rusk_copy_reverse_range",
+    code: "inline Obj<RuskReverseRangeIter> rusk_copy_reverse_range(Obj<RuskReverseRangeIter> it, Loc) { return make_obj<RuskReverseRangeIter>(*it); }",
+}

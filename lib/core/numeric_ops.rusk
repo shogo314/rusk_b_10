@@ -1,0 +1,64 @@
+//! 累乗、シフト、ビット反転の演算フックです。
+
+extern fn __pow__(x: Int, amount: Int) -> Int {
+    lower: "rusk_pow_i64(*$0, *$1, $loc)",
+    effects: "checked_read_fresh",
+    cpp_name: "rusk_native_pow_i64",
+    code: "inline Obj<std::int64_t> rusk_native_pow_i64(Obj<std::int64_t> x, Obj<std::int64_t> amount, Loc loc) { return make_obj<std::int64_t>(rusk_pow_i64(*x, *amount, loc)); }",
+}
+
+extern fn __shl__(x: Int, amount: Int) -> Int {
+    lower: "rusk_shift<std::int64_t, std::uint64_t>(*$0, *$1, true)",
+    effects: "read_fresh",
+    cpp_name: "rusk_native_shl_i64",
+    code: "inline Obj<std::int64_t> rusk_native_shl_i64(Obj<std::int64_t> x, Obj<std::int64_t> amount, Loc) { return make_obj<std::int64_t>(rusk_shift<std::int64_t, std::uint64_t>(*x, *amount, true)); }",
+}
+
+extern fn __shr__(x: Int, amount: Int) -> Int {
+    lower: "rusk_shift<std::int64_t, std::uint64_t>(*$0, *$1, false)",
+    effects: "read_fresh",
+    cpp_name: "rusk_native_shr_i64",
+    code: "inline Obj<std::int64_t> rusk_native_shr_i64(Obj<std::int64_t> x, Obj<std::int64_t> amount, Loc) { return make_obj<std::int64_t>(rusk_shift<std::int64_t, std::uint64_t>(*x, *amount, false)); }",
+}
+
+extern fn __bitnot__(x: Int) -> Int {
+    lower: "~*$0",
+    effects: "read_fresh",
+    cpp_name: "rusk_native_bitnot_i64",
+    code: "inline Obj<std::int64_t> rusk_native_bitnot_i64(Obj<std::int64_t> x, Loc) { return make_obj<std::int64_t>(~*x); }",
+}
+
+extern fn __pow__(x: Int128, amount: Int) -> Int128 {
+    lower: "rusk_pow_i128(*$0, *$1, $loc)",
+    effects: "checked_read_fresh",
+    cpp_name: "rusk_native_pow_i128",
+    code: "inline Obj<RuskI128> rusk_native_pow_i128(Obj<RuskI128> x, Obj<std::int64_t> amount, Loc loc) { return make_obj<RuskI128>(rusk_pow_i128(*x, *amount, loc)); }",
+}
+
+extern fn __shl__(x: Int128, amount: Int) -> Int128 {
+    lower: "rusk_shift<RuskI128, RuskU128>(*$0, *$1, true)",
+    effects: "read_fresh",
+    cpp_name: "rusk_native_shl_i128",
+    code: "inline Obj<RuskI128> rusk_native_shl_i128(Obj<RuskI128> x, Obj<std::int64_t> amount, Loc) { return make_obj<RuskI128>(rusk_shift<RuskI128, RuskU128>(*x, *amount, true)); }",
+}
+
+extern fn __shr__(x: Int128, amount: Int) -> Int128 {
+    lower: "rusk_shift<RuskI128, RuskU128>(*$0, *$1, false)",
+    effects: "read_fresh",
+    cpp_name: "rusk_native_shr_i128",
+    code: "inline Obj<RuskI128> rusk_native_shr_i128(Obj<RuskI128> x, Obj<std::int64_t> amount, Loc) { return make_obj<RuskI128>(rusk_shift<RuskI128, RuskU128>(*x, *amount, false)); }",
+}
+
+extern fn __bitnot__(x: Int128) -> Int128 {
+    lower: "~*$0",
+    effects: "read_fresh",
+    cpp_name: "rusk_native_bitnot_i128",
+    code: "inline Obj<RuskI128> rusk_native_bitnot_i128(Obj<RuskI128> x, Loc) { return make_obj<RuskI128>(~*x); }",
+}
+
+extern fn __pow__(base: Float, exponent: Float) -> Float {
+    lower: "std::pow(*$0, *$1)",
+    effects: "read_fresh",
+    cpp_name: "rusk_native_pow_float",
+    code: "inline Obj<double> rusk_native_pow_float(Obj<double> base, Obj<double> exponent, Loc) { return make_obj<double>(std::pow(*base, *exponent)); }",
+}

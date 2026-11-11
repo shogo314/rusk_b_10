@@ -1,0 +1,48 @@
+extern fn __add__(a: Int, b: Int) -> Int {
+    lower: "checked_int(static_cast<__int128>(*$0) + *$1, $loc)",
+    effects: "checked_read_fresh",
+    cpp_name: "add_Int",
+    code: "inline Obj<std::int64_t> add_Int(Obj<std::int64_t> a, Obj<std::int64_t> b, Loc loc) { return make_obj<std::int64_t>(checked_int((__int128)*a + *b, loc)); }",
+}
+
+extern fn __sub__(a: Int, b: Int) -> Int {
+    lower: "checked_int(static_cast<__int128>(*$0) - *$1, $loc)",
+    effects: "checked_read_fresh",
+    cpp_name: "sub_Int",
+    code: "inline Obj<std::int64_t> sub_Int(Obj<std::int64_t> a, Obj<std::int64_t> b, Loc loc) { return make_obj<std::int64_t>(checked_int((__int128)*a - *b, loc)); }",
+}
+
+extern fn __mul__(a: Int, b: Int) -> Int {
+    lower: "checked_int(static_cast<__int128>(*$0) * *$1, $loc)",
+    effects: "checked_read_fresh",
+    cpp_name: "mul_Int",
+    code: "inline Obj<std::int64_t> mul_Int(Obj<std::int64_t> a, Obj<std::int64_t> b, Loc loc) { return make_obj<std::int64_t>(checked_int((__int128)*a * *b, loc)); }",
+}
+
+extern fn __div__(a: Int, b: Int) -> Int {
+    lower: "rusk_div_int(*$0, *$1, $loc)",
+    effects: "checked_read_fresh",
+    cpp_name: "div_Int",
+    code: "inline Obj<std::int64_t> div_Int(Obj<std::int64_t> a, Obj<std::int64_t> b, Loc loc) {\nif (*b == 0) fail(loc, \"division by zero\");\n    __int128 a0 = *a, b0 = *b;\n    __int128 q = a0 / b0, r = a0 % b0;\n    if (r != 0 && ((r < 0) != (b0 < 0))) { --q; r += b0; }\n    return make_obj<std::int64_t>(checked_int(q, loc));\n}",
+}
+
+extern fn __mod__(a: Int, b: Int) -> Int {
+    lower: "rusk_mod_int(*$0, *$1, $loc)",
+    effects: "checked_read_fresh",
+    cpp_name: "mod_Int",
+    code: "inline Obj<std::int64_t> mod_Int(Obj<std::int64_t> a, Obj<std::int64_t> b, Loc loc) {\nif (*b == 0) fail(loc, \"division by zero\");\n    __int128 a0 = *a, b0 = *b;\n    __int128 q = a0 / b0, r = a0 % b0;\n    if (r != 0 && ((r < 0) != (b0 < 0))) { --q; r += b0; }\n    return make_obj<std::int64_t>(checked_int(r, loc));\n}",
+}
+
+extern fn __neg__(x: Int) -> Int {
+    lower: "checked_int(-static_cast<__int128>(*$0), $loc)",
+    effects: "checked_read_fresh",
+    cpp_name: "neg_Int",
+    code: "inline Obj<std::int64_t> neg_Int(Obj<std::int64_t> x, Loc loc) { return make_obj<std::int64_t>(checked_int(-(__int128)*x, loc)); }",
+}
+
+extern fn __pos__(x: Int) -> Int {
+    lower: "*$0",
+    effects: "checked_read_fresh",
+    cpp_name: "pos_Int",
+    code: "inline Obj<std::int64_t> pos_Int(Obj<std::int64_t> x, Loc loc) { return make_obj<std::int64_t>(checked_int((__int128)*x, loc)); }",
+}

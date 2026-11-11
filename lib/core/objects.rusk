@@ -1,0 +1,106 @@
+//! 基本型のコピー・代入・出力の宣言です。
+
+/// 同じ整数を持つ独立した値を作ります。
+extern fn copy(x: Int) -> Int {
+    lower: "*$0",
+    effects: "read_fresh",
+    cpp_name: "copy_Int",
+    code: "inline Obj<std::int64_t> copy_Int(Obj<std::int64_t> x, Loc) { return make_obj<std::int64_t>(*x); }",
+}
+
+extern fn __assign__(x: Int, y: Int) {
+    lower: "*$0 = *$1",
+    operation: "assign",
+    effects: "write_first",
+    cpp_name: "assign_Int",
+    code: "inline void assign_Int(Obj<std::int64_t> x, Obj<std::int64_t> y, Loc) { *x = *y; }",
+}
+
+extern fn __write__(x: Int) {
+    lower: "rusk_write(*$0)",
+    effects: "io_write",
+    cpp_name: "write_Int",
+    code: "inline void write_Int(Obj<std::int64_t> x, Loc) { rusk_write(*x); }",
+}
+
+/// 同じ真偽値を持つ独立した値を作ります。
+extern fn copy(x: Bool) -> Bool {
+    lower: "*$0",
+    effects: "read_fresh",
+    cpp_name: "copy_Bool",
+    code: "inline Obj<bool> copy_Bool(Obj<bool> x, Loc) { return make_obj<bool>(*x); }",
+}
+
+extern fn __assign__(x: Bool, y: Bool) {
+    lower: "*$0 = *$1",
+    operation: "assign",
+    effects: "write_first",
+    cpp_name: "assign_Bool",
+    code: "inline void assign_Bool(Obj<bool> x, Obj<bool> y, Loc) { *x = *y; }",
+}
+
+extern fn __write__(x: Bool) {
+    lower: "rusk_write(*$0)",
+    effects: "io_write",
+    cpp_name: "write_Bool",
+    code: "inline void write_Bool(Obj<bool> x, Loc) { rusk_write(*x); }",
+}
+
+/// 同じ文字を持つ独立した値を作ります。
+extern fn copy(x: Char) -> Char {
+    lower: "*$0",
+    effects: "read_fresh",
+    cpp_name: "copy_Char",
+    code: "inline Obj<char> copy_Char(Obj<char> x, Loc) { return make_obj<char>(*x); }",
+}
+
+extern fn __assign__(x: Char, y: Char) {
+    lower: "*$0 = *$1",
+    operation: "assign",
+    effects: "write_first",
+    cpp_name: "assign_Char",
+    code: "inline void assign_Char(Obj<char> x, Obj<char> y, Loc) { *x = *y; }",
+}
+
+extern fn __write__(x: Char) {
+    lower: "rusk_write(*$0)",
+    effects: "io_write",
+    cpp_name: "write_Char",
+    code: "inline void write_Char(Obj<char> x, Loc) { rusk_write(*x); }",
+}
+
+/// 文字列の内容を独立した文字列にコピーします。
+extern fn copy(x: Str) -> Str {
+    lower_owned: "make_obj<std::string>(*$0)",
+    effects: "read_fresh",
+    cpp_name: "copy_Str",
+    code: "inline Obj<std::string> copy_Str(Obj<std::string> x, Loc) { return make_obj<std::string>(*x); }",
+}
+
+extern fn __assign__(x: Str, y: Str) {
+    effects: "checked_resize_first",
+    cpp_name: "assign_Str",
+    code: "inline void assign_Str(Obj<std::string> x, Obj<std::string> y, Loc loc) { if(x->size()!=y->size()) { check_string_resize(x,loc); *x=*y; } else { std::copy(y->begin(),y->end(),x->begin()); } }",
+}
+
+extern fn __write__(x: Str) {
+    lower: "rusk_write(*$0)",
+    effects: "io_write",
+    cpp_name: "write_Str",
+    code: "inline void write_Str(Obj<std::string> x, Loc) { rusk_write(*x); }",
+}
+
+/// `Unit` 値を返します。
+extern fn copy(x: Unit) -> Unit {
+    lower_owned: "make_obj<Unit>(*$0)",
+    return_abi: "object",
+    effects: "read_fresh",
+    cpp_name: "copy_Unit",
+    code: "inline Obj<Unit> copy_Unit(Obj<Unit> x, Loc) { return make_obj<Unit>(*x); }",
+}
+
+extern fn __assign__(x: Unit, y: Unit) {
+    effects: "write_first",
+    cpp_name: "assign_Unit",
+    code: "inline void assign_Unit(Obj<Unit> x, Obj<Unit> y, Loc) { *x = *y; }",
+}

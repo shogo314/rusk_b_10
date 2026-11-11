@@ -1,0 +1,34 @@
+extern fn detached_int(readonly noescape value: Int) -> Int {
+    cpp_name: "detached_int",
+    code: "Obj<std::int64_t> detached_int(Obj<std::int64_t> value, Loc) { return make_obj<std::int64_t>(*value); }",
+}
+
+extern fn vector_size_as_row<T>(readonly noescape value: Vec<T>) -> Vec<Int> {
+    code: "@{return Vec<Int>} @{fn}(Obj<@{Vec<T>}> value, Loc) { auto row = make_obj<@{Vec<Int>}>(@{Vec<Int>}{}); row->push_back(make_obj<@{Int}>(value->size())); return row; }",
+}
+
+// この例では捕捉値を変更・保持しないコールバックだけを渡す。
+extern fn call_detached<F>(readonly noescape callback: F) -> Int {
+    code: "@{return Int} @{fn}(Obj<@{F}> callback, Loc loc) { auto result = @{invoke F()->Int}(callback, loc); return make_obj<std::int64_t>(*result); }",
+}
+
+fn from_vector(readonly noescape values: Vec<Int>) -> Vec<Int> {
+    let alias := values;
+    return vector_size_as_row(alias);
+}
+
+fn from_callback(readonly noescape value: Int) -> Int {
+    return call_detached(() => value);
+}
+
+readonly let value := 3;
+let independent := detached_int(value);
+independent = 7;
+let indirect := detached_int;
+wt value, independent, indirect(value), from_callback(value);
+
+readonly let values := [1, 2];
+let copied := from_vector(values);
+wt values, copied;
+copied[0] = 9;
+wt values, copied;

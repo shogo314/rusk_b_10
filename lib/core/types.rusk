@@ -1,0 +1,33 @@
+//! Ruskで使える基本型です。
+
+// Primitive logical types and their C++ representations.
+
+/// 符号付き64ビット整数です。
+extern type Int {
+    representation: "i64",
+    cpp_name: "std::int64_t",
+}
+
+/// 真または偽を表す型です。
+extern type Bool {
+    representation: "bool",
+    cpp_name: "bool",
+}
+
+/// ASCIIの1文字を表す型です。
+extern type Char {
+    representation: "char",
+    cpp_name: "char",
+}
+
+/// ASCII文字の列を表す可変長文字列です。
+extern type Str {
+    representation: "buffer<Char>",
+    cpp_name: "std::string",
+}
+
+/// 意味のある返却値がないことを表す単一値の型です。
+extern type Unit {
+    representation: "unit",
+    cpp_name: "Unit",
+}

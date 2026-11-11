@@ -1,0 +1,162 @@
+//! 比較の結果と、全順序・部分順序の操作です。
+
+/// 全順序の比較結果です。
+enum Ordering {
+    /// 左の値が右の値より前に並びます。
+    Less,
+    /// 順序上同じ値です。
+    Equal,
+    /// 左の値が右の値より後に並びます。
+    Greater,
+}
+
+/// 比較結果が `Ordering::Less` か調べます。
+fn is_less(order: Ordering) -> Bool {
+    return match order {
+        Less => true,
+        _ => false,
+    };
+}
+
+/// 比較結果が `Ordering::Equal` か調べます。
+fn is_equal(order: Ordering) -> Bool {
+    return match order {
+        Equal => true,
+        _ => false,
+    };
+}
+
+/// 比較結果が `Ordering::Greater` か調べます。
+fn is_greater(order: Ordering) -> Bool {
+    return match order {
+        Greater => true,
+        _ => false,
+    };
+}
+
+fn __ordering_lt__<A, B>(a: A, b: B) -> Bool {
+    return is_less(a <=> b);
+}
+
+fn __ordering_le__<A, B>(a: A, b: B) -> Bool {
+    return !is_greater(a <=> b);
+}
+
+fn __ordering_gt__<A, B>(a: A, b: B) -> Bool {
+    return is_greater(a <=> b);
+}
+
+fn __ordering_ge__<A, B>(a: A, b: B) -> Bool {
+    return !is_less(a <=> b);
+}
+
+fn __ordering_rank__(order: Ordering) -> Int {
+    return match order {
+        Less => 0,
+        Equal => 1,
+        Greater => 2,
+    };
+}
+
+fn __eq__(a: Ordering, b: Ordering) -> Bool {
+    return __ordering_rank__(a) == __ordering_rank__(b);
+}
+
+fn __ne__(a: Ordering, b: Ordering) -> Bool {
+    return !(a == b);
+}
+
+/// 比較結果を `"Less"`・`"Equal"`・`"Greater"` の文字列で返します。
+fn Str(order: Ordering) -> Str {
+    return match order {
+        Less => "Less",
+        Equal => "Equal",
+        Greater => "Greater",
+    };
+}
+
+fn __write__(order: Ordering) {
+    __write__(Str(order));
+}
+
+fn __cmp_relations__<T>(a: T, b: T) -> Ordering {
+    if a < b {
+        return Ordering::Less;
+    }
+    if b < a {
+        return Ordering::Greater;
+    }
+    return Ordering::Equal;
+}
+
+fn __cmp__(a: Int, b: Int) -> Ordering {
+    return __cmp_relations__(a, b);
+}
+
+fn __cmp__(a: Int128, b: Int128) -> Ordering {
+    return __cmp_relations__(a, b);
+}
+
+fn __cmp__(a: Char, b: Char) -> Ordering {
+    return __cmp_relations__(a, b);
+}
+
+fn __cmp__(a: Str, b: Str) -> Ordering {
+    return __cmp_relations__(a, b);
+}
+
+fn __cmp__(a: Bool, b: Bool) -> Ordering {
+    if a == b {
+        return Ordering::Equal;
+    }
+    return if a {
+        Ordering::Greater
+    } else {
+        Ordering::Less
+    };
+}
+
+fn __cmp__(a: Ordering, b: Ordering) -> Ordering {
+    return __ordering_rank__(a) <=> __ordering_rank__(b);
+}
+
+/// Floatを通常の比較規則で比較します。NaNを含む場合は `None` です。
+fn partial_cmp(a: Float, b: Float) -> Option<Ordering> {
+    if is_nan(a) || is_nan(b) {
+        return None;
+    }
+    return Some(__cmp_relations__(a, b));
+}
+
+/// Floatの符号付きゼロやNaNのビット表現も含む全順序で、左が右より前か調べます。
+extern fn total_less(a: Float, b: Float) -> Bool {
+    lower: "rusk_float_order_key(*$0) < rusk_float_order_key(*$1)",
+    effects: "read_fresh",
+    cpp_name: "rusk_float_total_less",
+    code: "inline Obj<bool> rusk_float_total_less(Obj<double> a, Obj<double> b, Loc) { return make_obj<bool>(rusk_float_order_key(*a) < rusk_float_order_key(*b)); }",
+}
+
+/// Floatを符号付きゼロやNaNのビット表現も含む全順序で比較します。
+fn total_cmp(a: Float, b: Float) -> Ordering {
+    if total_less(a, b) {
+        return Ordering::Less;
+    }
+    if total_less(b, a) {
+        return Ordering::Greater;
+    }
+    return Ordering::Equal;
+}
+
+// Sorts share the logical comparison, using primitive relations for the
+// standard types whose __cmp__ is defined by that same relation.
+extern fn __total_less__<T>(a: T, b: T) -> Bool {
+    lower: "@{if_type T matches Bool}(*$0 < *$1)@{else}@{if_type T matches Str}(*$0 < *$1)@{else}@{if_type T matches Char}(*$0 < *$1)@{else}@{if_type T matches Int128}(*$0 < *$1)@{else}@{if_type T matches Int}(*$0 < *$1)@{else}(rusk_enum_index<@{Ordering}>(@{call __cmp__(T,T)->Ordering}($0, $1, $loc)->value) == 0)@{end}@{end}@{end}@{end}@{end}",
+    effects: "read_fresh",
+    code: "Obj<bool> @{fn}(Obj<@{T}> a, Obj<@{T}> b, Loc loc) { return make_obj<bool>(@{if_type T matches Bool}(*a < *b)@{else}@{if_type T matches Str}(*a < *b)@{else}@{if_type T matches Char}(*a < *b)@{else}@{if_type T matches Int128}(*a < *b)@{else}@{if_type T matches Int}(*a < *b)@{else}(rusk_enum_index<@{Ordering}>(@{call __cmp__(T,T)->Ordering}(a, b, loc)->value) == 0)@{end}@{end}@{end}@{end}@{end}); }",
+}
+
+extern fn product_ordering_body<T>(a: T, b: T) -> Ordering {
+    derive: "tuple_cmp",
+    effects: "read_fresh",
+    code: "Obj<@{Ordering}> @{fn}(Obj<@{T}> a, Obj<@{T}> b, Loc loc) { @{fields T as F,I} { auto left = a->field_@{index I}; auto right = b->field_@{index I}; auto order = @{call __cmp__(F,F)->Ordering}(left,right,loc); if (rusk_enum_index<@{Ordering}>(order->value) != 1) return order; } @{end} return rusk_enum_make<@{Ordering},1>(); }",
+}

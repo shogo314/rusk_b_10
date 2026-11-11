@@ -1,0 +1,25 @@
+//! 整数配列の合計です。
+
+/// 要素を先頭から加算します。空なら0を返し、途中の合計が範囲外なら実行時エラーです。
+///
+/// ```rusk
+/// wt sum([1, 2, 3]);
+/// ```
+///
+/// 出力
+///
+/// ```text
+/// 6
+/// ```
+extern fn sum(a: Vec<Int>) -> Int {
+    effects: "checked_read_fresh",
+    cpp_name: "convenience_6",
+    code: "Obj<std::int64_t> convenience_6(Obj<IntVec> a, [[maybe_unused]] Loc loc) { std::int64_t total=0; for(const auto& x:*a) total=checked_int(static_cast<__int128>(total)+*x,loc); return make_obj<std::int64_t>(total); }",
+}
+/// 初期値から始めて要素を加算します。空なら初期値を共有して返します。
+extern fn sum(a: Vec<Int>, initial: Int) -> Int {
+    effects: "checked_read_fresh",
+    aliases: "fresh;return=1",
+    cpp_name: "convenience_7",
+    code: "Obj<std::int64_t> convenience_7(Obj<IntVec> a, Obj<std::int64_t> initial, Loc loc) { if (a->empty()) return initial; std::int64_t total=*initial; for(const auto& x:*a) total=checked_int(static_cast<__int128>(total)+*x,loc); return make_obj<std::int64_t>(total); }",
+}

@@ -1,0 +1,266 @@
+//! ハッシュに基づく辞書・集合と、その走査操作です。要素の走査順は規定しません。
+
+// Types and hash policies use ordinary generic native type references.
+/// キーと値の組を保持する辞書です。格納時にキーをコピーします。
+extern type<K, V> Dict {
+    cpp_name: "RuskDict<{K},{V},@{value_call __hash_key__<K>(K)->Int},@{value_call __equal_key__<K>(K,K)->Bool}>",
+    representation: "dict<K,V>",
+}
+/// 重複しないキーの集合です。格納時にキーをコピーします。
+extern type<K> Set {
+    cpp_name: "RuskSet<{K},@{value_call __hash_key__<K>(K)->Int},@{value_call __equal_key__<K>(K,K)->Bool}>",
+    representation: "set<K>",
+}
+
+extern fn __hash_key__<T>(x: T) -> Int {
+    effects: "read_fresh",
+    lower: "([&](){@{if_type T matches Int}return static_cast<@{Int}>(std::hash<@{T}>{}(*$0));@{else}@{if_type T matches Bool}return static_cast<@{Int}>(std::hash<@{T}>{}(*$0));@{else}@{if_type T matches Char}return static_cast<@{Int}>(std::hash<@{T}>{}(*$0));@{else}@{if_type T matches Str}return static_cast<@{Int}>(std::hash<@{T}>{}(*$0));@{else}std::size_t hash=0;@{fields T tuple as F,I}rusk_hash_combine(hash,static_cast<std::size_t>(@{value_call __hash_key__<F>(F)->Int}($0->field_@{index I},$loc)));@{end}return static_cast<@{Int}>(hash);@{end}@{end}@{end}@{end}}())",
+    code: "Obj<@{Int}> @{fn}(Obj<@{T}> x,[[maybe_unused]] Loc loc){return make_obj<@{Int}>(([&](){@{if_type T matches Int}return static_cast<@{Int}>(std::hash<@{T}>{}(*x));@{else}@{if_type T matches Bool}return static_cast<@{Int}>(std::hash<@{T}>{}(*x));@{else}@{if_type T matches Char}return static_cast<@{Int}>(std::hash<@{T}>{}(*x));@{else}@{if_type T matches Str}return static_cast<@{Int}>(std::hash<@{T}>{}(*x));@{else}std::size_t hash=0;@{fields T tuple as F,I}rusk_hash_combine(hash,static_cast<std::size_t>(@{value_call __hash_key__<F>(F)->Int}(x->field_@{index I},loc)));@{end}return static_cast<@{Int}>(hash);@{end}@{end}@{end}@{end}}()));}",
+}
+
+extern fn __equal_key__<T>(x: T, y: T) -> Bool {
+    effects: "read_fresh",
+    lower: "([&](){@{if_type T matches Int}return (*$0==*$1);@{else}@{if_type T matches Bool}return (*$0==*$1);@{else}@{if_type T matches Char}return (*$0==*$1);@{else}@{if_type T matches Str}return (*$0==*$1);@{else}@{fields T tuple as F,I}if(!@{value_call __equal_key__<F>(F,F)->Bool}($0->field_@{index I},$1->field_@{index I},$loc))return false;@{end}return true;@{end}@{end}@{end}@{end}}())",
+    code: "Obj<@{Bool}> @{fn}(Obj<@{T}> x,Obj<@{T}> y,[[maybe_unused]] Loc loc){return make_obj<@{Bool}>(([&](){@{if_type T matches Int}return (*x==*y);@{else}@{if_type T matches Bool}return (*x==*y);@{else}@{if_type T matches Char}return (*x==*y);@{else}@{if_type T matches Str}return (*x==*y);@{else}@{fields T tuple as F,I}if(!@{value_call __equal_key__<F>(F,F)->Bool}(x->field_@{index I},y->field_@{index I},loc))return false;@{end}return true;@{end}@{end}@{end}@{end}}()));}",
+}
+
+// Hash collection operations use ordinary generic extern resolution.
+
+/// 空の辞書を作ります。
+extern fn Dict<K, V>() -> Dict<K, V> {
+    effects: "read_fresh",
+    code: "Obj<@{Dict<K,V>}> @{fn}([[maybe_unused]] Loc loc){return make_obj<@{Dict<K,V>}>(@{Dict<K,V>}{});}",
+}
+
+/// 辞書の項目数を返します。
+extern fn len<K, V>(x: Dict<K, V>) -> Int {
+    effects: "checked_read_fresh",
+    code: "Obj<@{Int}> @{fn}(Obj<@{Dict<K,V>}> x,[[maybe_unused]] Loc loc){return make_obj<@{Int}>(checked_int(x->entries.size(),loc));}",
+}
+
+/// 辞書が空か調べます。
+extern fn is_empty<K, V>(x: Dict<K, V>) -> Bool {
+    effects: "read_fresh",
+    code: "Obj<@{Bool}> @{fn}(Obj<@{Dict<K,V>}> x,[[maybe_unused]] Loc loc){return make_obj<@{Bool}>(x->entries.empty());}",
+}
+
+extern fn __bool__<K, V>(x: Dict<K, V>) -> Bool {
+    effects: "read_fresh",
+    code: "Obj<@{Bool}> @{fn}(Obj<@{Dict<K,V>}> x,[[maybe_unused]] Loc loc){return make_obj<@{Bool}>(!x->entries.empty());}",
+}
+
+extern fn __not__<K, V>(x: Dict<K, V>) -> Bool {
+    effects: "read_fresh",
+    code: "Obj<@{Bool}> @{fn}(Obj<@{Dict<K,V>}> x,[[maybe_unused]] Loc loc){return make_obj<@{Bool}>(x->entries.empty());}",
+}
+
+/// 辞書のすべての項目を削除します。
+extern fn clear<K, V>(x: Dict<K, V>) -> Unit {
+    code: "void @{fn}(Obj<@{Dict<K,V>}> x,[[maybe_unused]] Loc loc){if(!x->entries.empty()){x->entries.clear();++x->version;}}",
+}
+
+/// 指定のキーが辞書に存在するか調べます。
+extern fn contains<K, V>(x: Dict<K, V>, key: K) -> Bool {
+    code: "Obj<@{Bool}> @{fn}(Obj<@{Dict<K,V>}> x,Obj<@{K}> key,[[maybe_unused]] Loc loc){return make_obj<@{Bool}>(x->entries.find(key)!=x->entries.end());}",
+}
+
+/// 辞書から指定のキーの項目を削除し、削除できたか返します。
+extern fn erase<K, V>(x: Dict<K, V>, key: K) -> Bool {
+    code: "Obj<@{Bool}> @{fn}(Obj<@{Dict<K,V>}> x,Obj<@{K}> key,[[maybe_unused]] Loc loc){auto count=x->entries.erase(key);if(count)++x->version;return make_obj<@{Bool}>(count!=0);}",
+}
+
+/// 空の集合を作ります。
+extern fn Set<K>() -> Set<K> {
+    effects: "read_fresh",
+    code: "Obj<@{Set<K>}> @{fn}([[maybe_unused]] Loc loc){return make_obj<@{Set<K>}>(@{Set<K>}{});}",
+}
+
+/// 集合の要素数を返します。
+extern fn len<K>(x: Set<K>) -> Int {
+    effects: "checked_read_fresh",
+    code: "Obj<@{Int}> @{fn}(Obj<@{Set<K>}> x,[[maybe_unused]] Loc loc){return make_obj<@{Int}>(checked_int(x->entries.size(),loc));}",
+}
+
+/// 集合が空か調べます。
+extern fn is_empty<K>(x: Set<K>) -> Bool {
+    effects: "read_fresh",
+    code: "Obj<@{Bool}> @{fn}(Obj<@{Set<K>}> x,[[maybe_unused]] Loc loc){return make_obj<@{Bool}>(x->entries.empty());}",
+}
+
+extern fn __bool__<K>(x: Set<K>) -> Bool {
+    effects: "read_fresh",
+    code: "Obj<@{Bool}> @{fn}(Obj<@{Set<K>}> x,[[maybe_unused]] Loc loc){return make_obj<@{Bool}>(!x->entries.empty());}",
+}
+
+extern fn __not__<K>(x: Set<K>) -> Bool {
+    effects: "read_fresh",
+    code: "Obj<@{Bool}> @{fn}(Obj<@{Set<K>}> x,[[maybe_unused]] Loc loc){return make_obj<@{Bool}>(x->entries.empty());}",
+}
+
+/// 集合のすべての要素を削除します。
+extern fn clear<K>(x: Set<K>) -> Unit {
+    code: "void @{fn}(Obj<@{Set<K>}> x,[[maybe_unused]] Loc loc){if(!x->entries.empty()){x->entries.clear();++x->version;}}",
+}
+
+/// 指定のキーが集合に存在するか調べます。
+extern fn contains<K>(x: Set<K>, key: K) -> Bool {
+    code: "Obj<@{Bool}> @{fn}(Obj<@{Set<K>}> x,Obj<@{K}> key,[[maybe_unused]] Loc loc){return make_obj<@{Bool}>(x->entries.find(key)!=x->entries.end());}",
+}
+
+/// 集合から指定のキーを削除し、削除できたか返します。
+extern fn erase<K>(x: Set<K>, key: K) -> Bool {
+    code: "Obj<@{Bool}> @{fn}(Obj<@{Set<K>}> x,Obj<@{K}> key,[[maybe_unused]] Loc loc){auto count=x->entries.erase(key);if(count)++x->version;return make_obj<@{Bool}>(count!=0);}",
+}
+
+/// 辞書の既定値を構築します。配列は空配列を作り、それ以外は値型の引数なしコンストラクタを呼びます。
+extern fn hash_default_value<V>() -> V {
+    return_abi: "object",
+    code: "Obj<@{V}> @{fn}([[maybe_unused]] Loc loc){@{if_type V matches Vec<E> with E}return @{boxed_call __vec_new__()->V}(loc);@{else}return @{boxed_call V()->V}(loc);@{end}}",
+}
+
+/// キーに対応する共有値を `Some` に包んで返します。キーがなければ `None` です。
+extern fn get<K, V>(x: Dict<K, V>, key: K) -> Option<V> {
+    code: "Obj<@{Option<V>}> @{fn}(Obj<@{Dict<K,V>}> x,Obj<@{K}> key,[[maybe_unused]] Loc loc){auto it=x->entries.find(key);if(it==x->entries.end())return rusk_enum_make<@{Option<V>},1>();auto value=it->second;return rusk_enum_make<@{Option<V>},0>(value);}",
+}
+
+/// 格納されているキーのコピーを `Some` に包んで返します。キーがなければ `None` です。
+extern fn get<K>(x: Set<K>, key: K) -> Option<K> {
+    code: "Obj<@{Option<K>}> @{fn}(Obj<@{Set<K>}> x,Obj<@{K}> key,[[maybe_unused]] Loc loc){auto it=x->entries.find(key);if(it==x->entries.end())return rusk_enum_make<@{Option<K>},1>();auto value=@{boxed_call copy(K)->K}(*it,loc);return rusk_enum_make<@{Option<K>},0>(value);}",
+}
+
+/// キーをコピーして集合に追加し、新規に追加したか返します。
+extern fn insert<K>(x: Set<K>, key: K) -> Bool {
+    code: "Obj<@{Bool}> @{fn}(Obj<@{Set<K>}> x,Obj<@{K}> key,[[maybe_unused]] Loc loc){if(x->entries.find(key)!=x->entries.end())return make_obj<@{Bool}>(false);auto copied=@{boxed_call copy(K)->K}(key,loc);x->entries.insert(copied);++x->version;return make_obj<@{Bool}>(true);}",
+}
+
+/// キーに対応する値を設定します。新規キーはコピーし、値は共有します。
+extern fn set<K, V>(x: Dict<K, V>, key: K, value: V) -> Unit {
+    code: "void @{fn}(Obj<@{Dict<K,V>}> x,Obj<@{K}> key,Obj<@{V}> value,[[maybe_unused]] Loc loc){auto it=x->entries.find(key);if(it!=x->entries.end())it->second=value;else{auto copied=@{boxed_call copy(K)->K}(key,loc);x->entries.emplace(copied,value);++x->version;}}",
+}
+
+extern fn __setitem__<K, V>(x: Dict<K, V>, key: K, value: V) -> V {
+    return_abi: "object",
+    code: "Obj<@{V}> @{fn}(Obj<@{Dict<K,V>}> x,Obj<@{K}> key,Obj<@{V}> value,[[maybe_unused]] Loc loc){auto it=x->entries.find(key);if(it!=x->entries.end())it->second=value;else{auto copied=@{boxed_call copy(K)->K}(key,loc);x->entries.emplace(copied,value);++x->version;}return value;}",
+}
+
+extern fn __getitem__<K, V>(x: Dict<K, V>, key: K) -> V {
+    return_abi: "object",
+    code: "Obj<@{V}> @{fn}(Obj<@{Dict<K,V>}> x,Obj<@{K}> key,[[maybe_unused]] Loc loc){auto it=x->entries.find(key);if(it!=x->entries.end())return it->second;auto copied=@{boxed_call copy(K)->K}(key,loc);auto value=@{boxed_call hash_default_value()->V}(loc);auto result=x->entries.emplace(copied,value);if(result.second)++x->version;return result.first->second;}",
+}
+
+/// 辞書のキーをコピーして配列に格納します。
+extern fn keys<K, V>(x: Dict<K, V>) -> Vec<K> {
+    code: "Obj<@{Vec<K>}> @{fn}(Obj<@{Dict<K,V>}> x,[[maybe_unused]] Loc loc){auto result=make_obj<@{Vec<K>}>(@{Vec<K>}{});result->reserve(x->entries.size());for(const auto& entry:x->entries)result->push_back(@{boxed_call copy(K)->K}(entry.first,loc));return result;}",
+}
+
+/// 辞書の値を共有する配列を返します。
+extern fn values<K, V>(x: Dict<K, V>) -> Vec<V> {
+    code: "Obj<@{Vec<V>}> @{fn}(Obj<@{Dict<K,V>}> x,[[maybe_unused]] Loc loc){auto result=make_obj<@{Vec<V>}>(@{Vec<V>}{});result->reserve(x->entries.size());for(const auto& entry:x->entries)result->push_back(entry.second);return result;}",
+}
+
+/// 集合のキーをコピーして配列に格納します。
+extern fn keys<K>(x: Set<K>) -> Vec<K> {
+    code: "Obj<@{Vec<K>}> @{fn}(Obj<@{Set<K>}> x,[[maybe_unused]] Loc loc){auto result=make_obj<@{Vec<K>}>(@{Vec<K>}{});result->reserve(x->entries.size());for(const auto& entry:x->entries)result->push_back(@{boxed_call copy(K)->K}(entry,loc));return result;}",
+}
+
+/// 集合の要素をコピーして配列に格納します。
+extern fn values<K>(x: Set<K>) -> Vec<K> {
+    code: "Obj<@{Vec<K>}> @{fn}(Obj<@{Set<K>}> x,[[maybe_unused]] Loc loc){auto result=make_obj<@{Vec<K>}>(@{Vec<K>}{});result->reserve(x->entries.size());for(const auto& entry:x->entries)result->push_back(@{boxed_call copy(K)->K}(entry,loc));return result;}",
+}
+
+// Iterator state and operations use the same generic extern path as Vec.
+/// 辞書を走査する状態です。各要素はキーのコピーと値の共有からなるタプルです。
+extern type<K, V> Iter<Dict<K, V>> {
+    cpp_name: "RuskHashIterator<{Dict<K,V>}>",
+    representation: "iterator<Tuple<K,V>>",
+    retains: "owner:Dict<K,V>",
+}
+
+extern fn __iter__<K, V>(owner: Dict<K, V>) -> Iter<Dict<K, V>> {
+    effects: "read_fresh",
+    aliases: "return.owner=0",
+    code: "Obj<@{Iter<Dict<K,V>>}> @{fn}(Obj<@{Dict<K,V>}> owner,[[maybe_unused]] Loc loc){return make_obj<@{Iter<Dict<K,V>>}>(@{Iter<Dict<K,V>>}(owner));}",
+}
+
+extern fn __iter__<K, V>(it: Iter<Dict<K, V>>) -> Iter<Dict<K, V>> {
+    effects: "read_fresh",
+    aliases: "return=0",
+    code: "Obj<@{Iter<Dict<K,V>>}> @{fn}(Obj<@{Iter<Dict<K,V>>}> it,[[maybe_unused]] Loc loc){return it;}",
+}
+
+extern fn __iter_has_next__<K, V>(it: Iter<Dict<K, V>>) -> Bool {
+    code: "Obj<@{Bool}> @{fn}(Obj<@{Iter<Dict<K,V>>}> it,Loc loc){if(it->finished)return make_obj<@{Bool}>(false);rusk_guard_iter(it,loc);if(it->position==it->end){it->finished=true;return make_obj<@{Bool}>(false);}return make_obj<@{Bool}>(true);}",
+}
+
+extern fn __iter_next__<K, V>(it: Iter<Dict<K, V>>) -> Tuple<K, V> {
+    return_abi: "object",
+    code: "Obj<@{Tuple<K,V>}> @{fn}(Obj<@{Iter<Dict<K,V>>}> it,Loc loc){if(!*@{boxed_call __iter_has_next__(Iter<Dict<K,V>>)->Bool}(it,loc))fail(loc,\"iterator exhausted\");auto key=@{boxed_call copy(K)->K}(it->position->first,loc);auto value=it->position->second;++it->position;return make_obj<@{Tuple<K,V>}>(@{Tuple<K,V>}{key,value});}",
+}
+
+/// 現在の走査位置をコピーし、辞書を共有する別の走査状態を返します。
+extern fn copy<K, V>(it: Iter<Dict<K, V>>) -> Iter<Dict<K, V>> {
+    effects: "checked_read_fresh",
+    aliases: "return.owner=0.owner",
+    lower_owned: "([&](){rusk_guard_iter($0,$loc);auto result=make_obj<@{Iter<Dict<K,V>>}>(@{Iter<Dict<K,V>>}($0->owner));if($0->finished)result->finished=true;else result->position=$0->position;return result;}())",
+    code: "Obj<@{Iter<Dict<K,V>>}> @{fn}(Obj<@{Iter<Dict<K,V>>}> it,Loc loc){rusk_guard_iter(it,loc);auto result=make_obj<@{Iter<Dict<K,V>>}>(@{Iter<Dict<K,V>>}(it->owner));if(it->finished)result->finished=true;else result->position=it->position;return result;}",
+}
+
+/// 集合を走査する状態です。走査で得る各キーはコピーです。
+extern type<K> Iter<Set<K>> {
+    cpp_name: "RuskHashIterator<{Set<K>}>",
+    representation: "iterator<K>",
+    retains: "owner:Set<K>",
+}
+
+extern fn __iter__<K>(owner: Set<K>) -> Iter<Set<K>> {
+    effects: "read_fresh",
+    aliases: "return.owner=0",
+    code: "Obj<@{Iter<Set<K>>}> @{fn}(Obj<@{Set<K>}> owner,[[maybe_unused]] Loc loc){return make_obj<@{Iter<Set<K>>}>(@{Iter<Set<K>>}(owner));}",
+}
+
+extern fn __iter__<K>(it: Iter<Set<K>>) -> Iter<Set<K>> {
+    effects: "read_fresh",
+    aliases: "return=0",
+    code: "Obj<@{Iter<Set<K>>}> @{fn}(Obj<@{Iter<Set<K>>}> it,[[maybe_unused]] Loc loc){return it;}",
+}
+
+extern fn __iter_has_next__<K>(it: Iter<Set<K>>) -> Bool {
+    code: "Obj<@{Bool}> @{fn}(Obj<@{Iter<Set<K>>}> it,Loc loc){if(it->finished)return make_obj<@{Bool}>(false);rusk_guard_iter(it,loc);if(it->position==it->end){it->finished=true;return make_obj<@{Bool}>(false);}return make_obj<@{Bool}>(true);}",
+}
+
+extern fn __iter_next__<K>(it: Iter<Set<K>>) -> K {
+    return_abi: "object",
+    code: "Obj<@{K}> @{fn}(Obj<@{Iter<Set<K>>}> it,Loc loc){if(!*@{boxed_call __iter_has_next__(Iter<Set<K>>)->Bool}(it,loc))fail(loc,\"iterator exhausted\");auto value=@{boxed_call copy(K)->K}(*it->position,loc);++it->position;return value;}",
+}
+
+/// 現在の走査位置をコピーし、集合を共有する別の走査状態を返します。
+extern fn copy<K>(it: Iter<Set<K>>) -> Iter<Set<K>> {
+    effects: "checked_read_fresh",
+    aliases: "return.owner=0.owner",
+    lower_owned: "([&](){rusk_guard_iter($0,$loc);auto result=make_obj<@{Iter<Set<K>>}>(@{Iter<Set<K>>}($0->owner));if($0->finished)result->finished=true;else result->position=$0->position;return result;}())",
+    code: "Obj<@{Iter<Set<K>>}> @{fn}(Obj<@{Iter<Set<K>>}> it,Loc loc){rusk_guard_iter(it,loc);auto result=make_obj<@{Iter<Set<K>>}>(@{Iter<Set<K>>}(it->owner));if(it->finished)result->finished=true;else result->position=it->position;return result;}",
+}
+
+/// 各キーと値をそれぞれの `copy` でコピーし、新しい辞書を作ります。
+extern fn copy<K, V>(x: Dict<K, V>) -> Dict<K, V> {
+    effects: "checked_read_fresh",
+    lower_owned: "([&](){auto clone=[&](const auto& x){[[maybe_unused]]const auto version=x->version;[[maybe_unused]]const auto size=x->entries.size();auto guard=[&](){if constexpr(@{writes copy(K)->K}||@{writes copy(V)->V}){if(x->version!=version||x->entries.size()!=size)fail($loc,\"container changed during copy\");}};auto result=make_obj<@{Dict<K,V>}>(@{Dict<K,V>}{});auto position=x->entries.begin();while(true){guard();if(position==x->entries.end())break;if constexpr(@{writes copy(K)->K}||@{writes copy(V)->V}){{auto original_key=position->first;auto key=@{boxed_call copy(K)->K}(original_key,$loc);guard();auto original_value=position->second;auto item=@{boxed_call copy(V)->V}(original_value,$loc);guard();result->entries.emplace(key,item);}}else{auto key=@{boxed_call copy(K)->K}(position->first,$loc);auto item=@{boxed_call copy(V)->V}(position->second,$loc);result->entries.emplace(key,item);}guard();++position;}return result;};if constexpr(@{writes copy(K)->K}||@{writes copy(V)->V}){auto owner=$0;return clone(owner);}else return clone($0);}())",
+    lower_rooted: "([&](){auto& x=$0;[[maybe_unused]]const auto version=x->version;[[maybe_unused]]const auto size=x->entries.size();auto guard=[&](){if constexpr(@{writes copy(K)->K}||@{writes copy(V)->V}){if(x->version!=version||x->entries.size()!=size)fail($loc,\"container changed during copy\");}};auto result=make_obj<@{Dict<K,V>}>(@{Dict<K,V>}{});auto position=x->entries.begin();while(true){guard();if(position==x->entries.end())break;if constexpr(@{writes copy(K)->K}||@{writes copy(V)->V}){{auto original_key=position->first;auto key=@{boxed_call copy(K)->K}(original_key,$loc);guard();auto original_value=position->second;auto item=@{boxed_call copy(V)->V}(original_value,$loc);guard();result->entries.emplace(key,item);}}else{auto key=@{boxed_call copy(K)->K}(position->first,$loc);auto item=@{boxed_call copy(V)->V}(position->second,$loc);result->entries.emplace(key,item);}guard();++position;}return result;}())",
+    code: "Obj<@{Dict<K,V>}> @{fn}(Obj<@{Dict<K,V>}> x,Loc loc){[[maybe_unused]]const auto version=x->version;[[maybe_unused]]const auto size=x->entries.size();auto guard=[&](){if constexpr(@{writes copy(K)->K}||@{writes copy(V)->V}){if(x->version!=version||x->entries.size()!=size)fail(loc,\"container changed during copy\");}};auto result=make_obj<@{Dict<K,V>}>(@{Dict<K,V>}{});auto position=x->entries.begin();while(true){guard();if(position==x->entries.end())break;if constexpr(@{writes copy(K)->K}||@{writes copy(V)->V}){{auto original_key=position->first;auto key=@{boxed_call copy(K)->K}(original_key,loc);guard();auto original_value=position->second;auto item=@{boxed_call copy(V)->V}(original_value,loc);guard();result->entries.emplace(key,item);}}else{auto key=@{boxed_call copy(K)->K}(position->first,loc);auto item=@{boxed_call copy(V)->V}(position->second,loc);result->entries.emplace(key,item);}guard();++position;}return result;}",
+}
+
+extern fn __assign__<K, V>(target: Dict<K, V>, source: Dict<K, V>) -> Unit {
+    code: "void @{fn}(Obj<@{Dict<K,V>}> target,Obj<@{Dict<K,V>}> source,Loc loc){auto snapshot=@{rooted_call copy(Dict<K,V>)->Dict<K,V>}(source,loc);target->entries.swap(snapshot->entries);++target->version;const auto version=target->version;const auto size=target->entries.size();auto guard=[&](){if(target->version!=version||target->entries.size()!=size)fail(loc,\"container changed during assignment\");};snapshot->entries.clear();guard();snapshot.reset();guard();}",
+}
+
+/// 各キーを `copy` でコピーし、新しい集合を作ります。
+extern fn copy<K>(x: Set<K>) -> Set<K> {
+    effects: "checked_read_fresh",
+    lower_owned: "([&](){auto clone=[&](const auto& x){[[maybe_unused]]const auto version=x->version;[[maybe_unused]]const auto size=x->entries.size();auto guard=[&](){if constexpr(@{writes copy(K)->K}){if(x->version!=version||x->entries.size()!=size)fail($loc,\"container changed during copy\");}};auto result=make_obj<@{Set<K>}>(@{Set<K>}{});auto position=x->entries.begin();while(true){guard();if(position==x->entries.end())break;if constexpr(@{writes copy(K)->K}){{auto original= *position;auto key=@{boxed_call copy(K)->K}(original,$loc);guard();result->entries.insert(key);}}else{result->entries.insert(@{boxed_call copy(K)->K}(*position,$loc));}guard();++position;}return result;};if constexpr(@{writes copy(K)->K}){auto owner=$0;return clone(owner);}else return clone($0);}())",
+    lower_rooted: "([&](){auto& x=$0;[[maybe_unused]]const auto version=x->version;[[maybe_unused]]const auto size=x->entries.size();auto guard=[&](){if constexpr(@{writes copy(K)->K}){if(x->version!=version||x->entries.size()!=size)fail($loc,\"container changed during copy\");}};auto result=make_obj<@{Set<K>}>(@{Set<K>}{});auto position=x->entries.begin();while(true){guard();if(position==x->entries.end())break;if constexpr(@{writes copy(K)->K}){{auto original= *position;auto key=@{boxed_call copy(K)->K}(original,$loc);guard();result->entries.insert(key);}}else{result->entries.insert(@{boxed_call copy(K)->K}(*position,$loc));}guard();++position;}return result;}())",
+    code: "Obj<@{Set<K>}> @{fn}(Obj<@{Set<K>}> x,Loc loc){[[maybe_unused]]const auto version=x->version;[[maybe_unused]]const auto size=x->entries.size();auto guard=[&](){if constexpr(@{writes copy(K)->K}){if(x->version!=version||x->entries.size()!=size)fail(loc,\"container changed during copy\");}};auto result=make_obj<@{Set<K>}>(@{Set<K>}{});auto position=x->entries.begin();while(true){guard();if(position==x->entries.end())break;if constexpr(@{writes copy(K)->K}){{auto original= *position;auto key=@{boxed_call copy(K)->K}(original,loc);guard();result->entries.insert(key);}}else{result->entries.insert(@{boxed_call copy(K)->K}(*position,loc));}guard();++position;}return result;}",
+}
+
+extern fn __assign__<K>(target: Set<K>, source: Set<K>) -> Unit {
+    code: "void @{fn}(Obj<@{Set<K>}> target,Obj<@{Set<K>}> source,Loc loc){auto snapshot=@{rooted_call copy(Set<K>)->Set<K>}(source,loc);target->entries.swap(snapshot->entries);++target->version;const auto version=target->version;const auto size=target->entries.size();auto guard=[&](){if(target->version!=version||target->entries.size()!=size)fail(loc,\"container changed during assignment\");};snapshot->entries.clear();guard();snapshot.reset();guard();}",
+}

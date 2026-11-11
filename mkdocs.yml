@@ -1,0 +1,89 @@
+site_name: Rusk
+site_description: 競技プログラミング向け言語 Rusk の仕様・ライブラリ・開発ガイド
+site_url: https://shogo314.github.io/rusk_b_10/
+repo_url: https://github.com/shogo314/rusk_b_10
+repo_name: shogo314/rusk_b_10
+edit_uri: edit/main/docs/
+strict: true
+theme:
+  name: material
+  language: ja
+  features:
+    - navigation.tabs
+    - navigation.tabs.sticky
+    - search.highlight
+    - search.suggest
+    - content.code.copy
+    - toc.follow
+nav:
+  - ホーム: index.md
+  - はじめに:
+      - 導入と実行: getting-started/index.md
+      - 小さなプログラムで学ぶ: getting-started/tutorial.md
+      - コマンドライン: getting-started/cli.md
+      - ソースの整形: getting-started/formatting.md
+  - 言語リファレンス:
+      - 基本構文と共有: reference/index.md
+      - 型と関数:
+          - 型の一覧: reference/types.md
+          - 構造体・タプル・型引数: reference/records.md
+          - 演算子: reference/operators.md
+          - 関数: reference/functions.md
+          - 関数の受け渡しと捕捉: reference/closures.md
+      - 制御とパターン:
+          - 分岐とループ: reference/control-flow.md
+          - ブロック式とループラベル: reference/blocks-labels.md
+          - enumとmatch: reference/enums.md
+          - パターンとガード: reference/patterns.md
+          - 分岐式・Option・比較の連鎖: reference/expressions.md
+      - 共有と契約:
+          - fixedとrebindable: reference/bindings.md
+          - readonlyとmutable: reference/access.md
+          - noescapeとescape: reference/escape.md
+          - 型・共有・評価の規則: reference/semantics.md
+      - 文法と制限:
+          - 文法一覧（EBNF）: reference/grammar.md
+          - 対応機能と制限: reference/status.md
+          - エラーと制限: reference/errors.md
+  - ライブラリ:
+      - 標準ライブラリ: library/index.md
+      - APIリファレンス: library/api.md
+      - 入出力: library/input-output.md
+      - 配列と文字列: library/sequences.md
+      - 辞書・集合と不在を返す操作: library/collections.md
+      - Ruskで記述したデータ構造: library/data-structures.md
+      - 関数を使う操作とデータ構造: library/algorithms.md
+  - 開発ガイド:
+      - 構成と開発の入口: development/index.md
+      - 現在の作業計画: development/plan.md
+      - 将来の方針: future.md
+      - 処理系とライブラリの境界: development/architecture.md
+      - 変換パイプラインとIR: development/pipeline.md
+      - extern・C++参照・契約: development/extern.md
+      - テストの実行: development/verification.md
+      - 性能と最適化: development/performance.md
+      - ドキュメントの編集と公開: development/documentation.md
+      - 文書コメント: development/doc-comments.md
+      - 過去の開発記録: development/history.md
+not_in_nav: |
+  /development/beta*.md
+  /development/enums.md
+  /development/pipeline-history.md
+  /library/beta*.md
+  /reference/beta*.md
+  /reference/minmax.md
+markdown_extensions:
+  - md_in_html
+  - attr_list
+  - admonition
+  - fenced_code
+  - tables
+hooks:
+  - tools/mkdocs_api.py
+extra_javascript:
+  - assets/javascripts/api-search.js
+extra_css:
+  - assets/stylesheets/api-search.css
+watch:
+  - lib
+  - src

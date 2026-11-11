@@ -1,0 +1,52 @@
+.rusk-api-search {
+  margin-block: 1.5rem;
+}
+
+.rusk-api-search label {
+  display: block;
+  margin-bottom: 0.4rem;
+  font-weight: 700;
+}
+
+.rusk-api-search-controls {
+  display: flex;
+  gap: 0.5rem;
+}
+
+.rusk-api-search input {
+  flex: 1;
+  min-width: 0;
+  padding: 0.65rem;
+  border: 1px solid var(--md-default-fg-color--lighter);
+  border-radius: 0.2rem;
+  background: var(--md-default-bg-color);
+  color: var(--md-default-fg-color);
+  font: inherit;
+}
+
+.rusk-api-search input:focus-visible,
+.rusk-api-search button:focus-visible {
+  outline: 2px solid var(--md-accent-fg-color);
+  outline-offset: 2px;
+}
+
+.rusk-api-search button {
+  padding-inline: 0.8rem;
+  border: 1px solid var(--md-default-fg-color--lighter);
+  border-radius: 0.2rem;
+  color: var(--md-default-fg-color);
+  font: inherit;
+  cursor: pointer;
+}
+
+.rusk-api-search [role="status"] {
+  margin-top: 0.4rem;
+  color: var(--md-default-fg-color--light);
+  font-size: 0.8em;
+}
+
+.rusk-api-entry[hidden],
+.rusk-api-file[hidden],
+.md-nav--secondary li[hidden] {
+  display: none;
+}

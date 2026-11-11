@@ -1,0 +1,18 @@
+//! 配列の線形探索です。
+
+/// 等しい要素のうち最初の位置を0始まりで返します。見つからなければ `None` を返します。
+fn find<T>(a: Vec<T>, value: T) -> Option<Int> {
+    let it := __iter__(a);
+    let index := 0;
+    while __iter_has_next__(it) {
+        let current := __iter_next__(it);
+        let matched: Bool := current == value;
+        // Validate even a successful comparison before returning its index.
+        __iter_has_next__(it);
+        if matched {
+            return Some(copy(index));
+        }
+        index += 1;
+    }
+    return None::<Int>();
+}

@@ -1,0 +1,229 @@
+//! IEEE 754 binary64の浮動小数点値と演算です。
+
+/// IEEE 754の64ビット浮動小数点型です。
+extern type Float {
+    cpp_name: "double",
+    representation: "f64",
+}
+
+/// 正のゼロを返します。
+extern fn Float() -> Float {
+    lower: "0.0",
+    effects: "read_fresh",
+    cpp_name: "rusk_float_zero",
+    code: "inline Obj<double> rusk_float_zero(Loc) { return make_obj<double>(0.0); }",
+}
+
+/// 浮動小数点値をコピーします。
+extern fn Float(x: Float) -> Float {
+    lower: "*$0",
+    effects: "read_fresh",
+    cpp_name: "rusk_float_copy_ctor",
+    code: "inline Obj<double> rusk_float_copy_ctor(Obj<double> x, Loc) { return make_obj<double>(*x); }",
+}
+
+/// 整数をFloatへ変換します。正確に表せない場合はFloatの精度へ丸めます。
+extern fn Float(x: Int) -> Float {
+    lower: "static_cast<double>(*$0)",
+    effects: "read_fresh",
+    cpp_name: "rusk_float_from_int",
+    code: "inline Obj<double> rusk_float_from_int(Obj<std::int64_t> x, Loc) { return make_obj<double>(static_cast<double>(*x)); }",
+}
+
+/// 10進表記、指数表記、`nan`、`inf`、`-inf`を読み取ります。不正な入力や範囲外は実行時エラーです。
+extern fn Float(text: Str) -> Float {
+    lower: "rusk_parse_float(*$0, $loc)",
+    effects: "checked_read_fresh",
+    cpp_name: "rusk_float_from_str",
+    code: "inline Obj<double> rusk_float_from_str(Obj<std::string> text, Loc loc) { return make_obj<double>(rusk_parse_float(*text, loc)); }",
+}
+
+/// ゼロ方向に丸めてIntへ変換します。NaN・無限大・範囲外は実行時エラーです。
+extern fn Int(x: Float) -> Int {
+    lower: "rusk_float_to_int(*$0, $loc)",
+    effects: "checked_read_fresh",
+    cpp_name: "rusk_float_to_int",
+    code: "inline Obj<std::int64_t> rusk_float_to_int(Obj<double> x, Loc loc) { return make_obj<std::int64_t>(rusk_float_to_int(*x, loc)); }",
+}
+
+/// Floatへ読み戻せる短い十進表記を返します。必要に応じて指数表記を使います。
+extern fn Str(x: Float) -> Str {
+    effects: "checked_read_fresh",
+    cpp_name: "rusk_float_to_str",
+    code: "inline Obj<std::string> rusk_float_to_str(Obj<double> x, Loc loc) { return make_obj<std::string>(rusk_float_text(*x, -1, loc)); }",
+}
+
+/// 同じFloatの値を持つ独立した値を作ります。
+extern fn copy(x: Float) -> Float {
+    lower: "*$0",
+    effects: "read_fresh",
+    cpp_name: "rusk_float_copy",
+    code: "inline Obj<double> rusk_float_copy(Obj<double> x, Loc) { return make_obj<double>(*x); }",
+}
+
+extern fn __assign__(x: Float, value: Float) {
+    lower: "*$0 = *$1",
+    operation: "assign",
+    effects: "write_first",
+    cpp_name: "rusk_float_assign",
+    code: "inline void rusk_float_assign(Obj<double> x, Obj<double> value, Loc) { *x = *value; }",
+}
+
+extern fn __add__(a: Float, b: Float) -> Float {
+    lower: "*$0 + *$1",
+    effects: "read_fresh",
+    cpp_name: "rusk_float_add",
+    code: "inline Obj<double> rusk_float_add(Obj<double> a, Obj<double> b, Loc) { return make_obj<double>(*a + *b); }",
+}
+
+extern fn __sub__(a: Float, b: Float) -> Float {
+    lower: "*$0 - *$1",
+    effects: "read_fresh",
+    cpp_name: "rusk_float_sub",
+    code: "inline Obj<double> rusk_float_sub(Obj<double> a, Obj<double> b, Loc) { return make_obj<double>(*a - *b); }",
+}
+
+extern fn __mul__(a: Float, b: Float) -> Float {
+    lower: "*$0 * *$1",
+    effects: "read_fresh",
+    cpp_name: "rusk_float_mul",
+    code: "inline Obj<double> rusk_float_mul(Obj<double> a, Obj<double> b, Loc) { return make_obj<double>(*a * *b); }",
+}
+
+extern fn __div__(a: Float, b: Float) -> Float {
+    lower: "*$0 / *$1",
+    effects: "read_fresh",
+    cpp_name: "rusk_float_div",
+    code: "inline Obj<double> rusk_float_div(Obj<double> a, Obj<double> b, Loc) { return make_obj<double>(*a / *b); }",
+}
+
+extern fn __neg__(x: Float) -> Float {
+    lower: "-*$0",
+    effects: "read_fresh",
+    cpp_name: "rusk_float_neg",
+    code: "inline Obj<double> rusk_float_neg(Obj<double> x, Loc) { return make_obj<double>(-*x); }",
+}
+
+extern fn __pos__(x: Float) -> Float {
+    lower: "+*$0",
+    effects: "read_fresh",
+    cpp_name: "rusk_float_pos",
+    code: "inline Obj<double> rusk_float_pos(Obj<double> x, Loc) { return make_obj<double>(+*x); }",
+}
+
+extern fn __eq__(a: Float, b: Float) -> Bool {
+    lower: "*$0 == *$1",
+    effects: "read_fresh",
+    cpp_name: "rusk_float_eq",
+    code: "inline Obj<bool> rusk_float_eq(Obj<double> a, Obj<double> b, Loc) { return make_obj<bool>(*a == *b); }",
+}
+
+extern fn __ne__(a: Float, b: Float) -> Bool {
+    lower: "*$0 != *$1",
+    effects: "read_fresh",
+    cpp_name: "rusk_float_ne",
+    code: "inline Obj<bool> rusk_float_ne(Obj<double> a, Obj<double> b, Loc) { return make_obj<bool>(*a != *b); }",
+}
+
+extern fn __lt__(a: Float, b: Float) -> Bool {
+    lower: "*$0 < *$1",
+    effects: "read_fresh",
+    cpp_name: "rusk_float_lt",
+    code: "inline Obj<bool> rusk_float_lt(Obj<double> a, Obj<double> b, Loc) { return make_obj<bool>(*a < *b); }",
+}
+
+extern fn __le__(a: Float, b: Float) -> Bool {
+    lower: "*$0 <= *$1",
+    effects: "read_fresh",
+    cpp_name: "rusk_float_le",
+    code: "inline Obj<bool> rusk_float_le(Obj<double> a, Obj<double> b, Loc) { return make_obj<bool>(*a <= *b); }",
+}
+
+extern fn __gt__(a: Float, b: Float) -> Bool {
+    lower: "*$0 > *$1",
+    effects: "read_fresh",
+    cpp_name: "rusk_float_gt",
+    code: "inline Obj<bool> rusk_float_gt(Obj<double> a, Obj<double> b, Loc) { return make_obj<bool>(*a > *b); }",
+}
+
+extern fn __ge__(a: Float, b: Float) -> Bool {
+    lower: "*$0 >= *$1",
+    effects: "read_fresh",
+    cpp_name: "rusk_float_ge",
+    code: "inline Obj<bool> rusk_float_ge(Obj<double> a, Obj<double> b, Loc) { return make_obj<bool>(*a >= *b); }",
+}
+
+/// 絶対値を返します。
+extern fn abs(x: Float) -> Float {
+    lower: "std::fabs(*$0)",
+    effects: "read_fresh",
+    cpp_name: "rusk_float_abs",
+    code: "inline Obj<double> rusk_float_abs(Obj<double> x, Loc) { return make_obj<double>(std::fabs(*x)); }",
+}
+
+/// 負の無限大方向に丸めたFloatを返します。
+extern fn floor(x: Float) -> Float {
+    lower: "std::floor(*$0)",
+    effects: "read_fresh",
+    cpp_name: "rusk_float_floor",
+    code: "inline Obj<double> rusk_float_floor(Obj<double> x, Loc) { return make_obj<double>(std::floor(*x)); }",
+}
+
+/// 正の無限大方向に丸めたFloatを返します。
+extern fn ceil(x: Float) -> Float {
+    lower: "std::ceil(*$0)",
+    effects: "read_fresh",
+    cpp_name: "rusk_float_ceil",
+    code: "inline Obj<double> rusk_float_ceil(Obj<double> x, Loc) { return make_obj<double>(std::ceil(*x)); }",
+}
+
+/// 最も近い整数のFloatを返します。ちょうど中間ならゼロから離れる側に丸めます。
+extern fn round(x: Float) -> Float {
+    lower: "std::round(*$0)",
+    effects: "read_fresh",
+    cpp_name: "rusk_float_round",
+    code: "inline Obj<double> rusk_float_round(Obj<double> x, Loc) { return make_obj<double>(std::round(*x)); }",
+}
+
+/// NaNか調べます。
+extern fn is_nan(x: Float) -> Bool {
+    lower: "std::isnan(*$0)",
+    effects: "read_fresh",
+    cpp_name: "rusk_float_is_nan",
+    code: "inline Obj<bool> rusk_float_is_nan(Obj<double> x, Loc) { return make_obj<bool>(std::isnan(*x)); }",
+}
+
+/// 正または負の無限大か調べます。
+extern fn is_inf(x: Float) -> Bool {
+    lower: "std::isinf(*$0)",
+    effects: "read_fresh",
+    cpp_name: "rusk_float_is_inf",
+    code: "inline Obj<bool> rusk_float_is_inf(Obj<double> x, Loc) { return make_obj<bool>(std::isinf(*x)); }",
+}
+
+/// 有限値か調べます。
+extern fn is_finite(x: Float) -> Bool {
+    lower: "std::isfinite(*$0)",
+    effects: "read_fresh",
+    cpp_name: "rusk_float_is_finite",
+    code: "inline Obj<bool> rusk_float_is_finite(Obj<double> x, Loc) { return make_obj<bool>(std::isfinite(*x)); }",
+}
+
+/// 小数点以下の桁数を0〜1000で指定して固定小数点表記を返します。
+extern fn format_fixed(x: Float, digits: Int) -> Str {
+    effects: "checked_read_fresh",
+    cpp_name: "rusk_float_fixed",
+    code: "inline Obj<std::string> rusk_float_fixed(Obj<double> x, Obj<std::int64_t> digits, Loc loc) { return make_obj<std::string>(rusk_fixed_float(*x, *digits, loc)); }",
+}
+
+extern fn __read__() -> Float {
+    effects: "io_read_fresh",
+    cpp_name: "rusk_float_read",
+    code: "inline Obj<double> rusk_float_read(Loc loc) { return make_obj<double>(rusk_parse_float(read_token(loc), loc)); }",
+}
+
+extern fn __write__(x: Float) {
+    effects: "checked_io_write",
+    cpp_name: "rusk_float_write",
+    code: "inline void rusk_float_write(Obj<double> x, Loc loc) { rusk_write(rusk_float_text(*x, -1, loc)); }",
+}

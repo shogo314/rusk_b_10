@@ -1,0 +1,1218 @@
+//! Conservative, target-independent summaries. Opaque code is never inferred
+//! pure from its name or from target-language source.
+mod private;
+mod routes;
+pub(crate) use routes::projection_name;
+
+use crate::{
+    ir::hir::{Place, Rvalue, Value, ValueId},
+    ir::lir::{self, Operation, Terminator},
+};
+use std::collections::{BTreeMap, BTreeSet, VecDeque};
+
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, PartialOrd, Ord)]
+pub(crate) enum Effect {
+    #[default]
+    No,
+    May,
+    Unknown,
+}
+impl Effect {
+    fn join(&mut self, other: Self) {
+        *self = (*self).max(other);
+    }
+}
+
+/// Conservative questions that native declarations can ask after inference.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
+pub(crate) enum Query {
+    Writes,
+    Fails,
+}
+impl Query {
+    pub(crate) fn name(self) -> &'static str {
+        match self {
+            Self::Writes => "writes",
+            Self::Fails => "fails",
+        }
+    }
+    pub(crate) fn evaluate(self, summary: &Summary) -> bool {
+        match self {
+            Self::Writes => {
+                summary.external_write != Effect::No
+                    || summary
+                        .parameters
+                        .iter()
+                        .any(|p| p.write != Effect::No || p.structural != Effect::No)
+            }
+            Self::Fails => summary.may_fail != Effect::No,
+        }
+    }
+}
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub(crate) struct ParameterEffects {
+    pub read: Effect,
+    pub write: Effect,
+    pub structural: Effect,
+    pub escape: Effect,
+    /// Retained outside the call other than via its returned value.
+    pub retained: Effect,
+}
+impl ParameterEffects {
+    fn unknown() -> Self {
+        Self {
+            read: Effect::Unknown,
+            write: Effect::Unknown,
+            structural: Effect::Unknown,
+            escape: Effect::Unknown,
+            retained: Effect::Unknown,
+        }
+    }
+    fn join(&mut self, other: &Self) {
+        self.read.join(other.read);
+        self.write.join(other.write);
+        self.structural.join(other.structural);
+        self.escape.join(other.escape);
+        self.retained.join(other.retained);
+    }
+}
+#[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord)]
+pub(crate) enum Projection {
+    Element,
+    Field(usize),
+    Retained(usize),
+    VariantField { variant: usize, field: usize },
+}
+#[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord)]
+pub(crate) struct ReturnAlias {
+    pub result_path: Vec<Projection>,
+    pub parameter: usize,
+    pub parameter_path: Vec<Projection>,
+}
+/// A may-set, including references contained in an aggregate. Unknown can
+/// exclude specific parameters. Fresh denotes a possible independent allocation.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub(crate) struct ReturnOrigins {
+    pub aliases: BTreeSet<ReturnAlias>,
+    pub fresh: bool,
+    pub unknown: bool,
+    pub excluded_parameters: BTreeSet<usize>,
+}
+const MAX_ALIASES: usize = 64;
+const MAX_PATH: usize = 16;
+impl ReturnOrigins {
+    fn unknown() -> Self {
+        Self {
+            unknown: true,
+            ..Self::default()
+        }
+    }
+    fn fresh() -> Self {
+        Self {
+            fresh: true,
+            ..Self::default()
+        }
+    }
+    fn parameter(parameter: usize) -> Self {
+        Self {
+            aliases: [ReturnAlias {
+                result_path: vec![],
+                parameter,
+                parameter_path: vec![],
+            }]
+            .into(),
+            ..Self::default()
+        }
+    }
+    fn bounded(mut self) -> Self {
+        if self.unknown {
+            self.aliases.clear();
+            self.fresh = false;
+        } else if self.aliases.len() > MAX_ALIASES
+            || self
+                .aliases
+                .iter()
+                .any(|a| a.result_path.len() > MAX_PATH || a.parameter_path.len() > MAX_PATH)
+        {
+            self = Self::unknown();
+        }
+        self
+    }
+    pub(crate) fn may_share(&self, parameter: usize) -> bool {
+        if self.unknown {
+            !self.excluded_parameters.contains(&parameter)
+        } else {
+            self.aliases
+                .iter()
+                .any(|alias| alias.parameter == parameter)
+        }
+    }
+    fn join(&mut self, other: &Self) {
+        if other.unknown && !self.unknown {
+            let mut joined = other.clone();
+            joined.join(self);
+            *self = joined;
+            return;
+        }
+        if self.unknown {
+            self.excluded_parameters
+                .retain(|parameter| !other.may_share(*parameter));
+            return;
+        }
+        self.fresh |= other.fresh;
+        self.aliases.extend(other.aliases.iter().cloned());
+        *self = std::mem::take(self).bounded();
+    }
+    fn project(&self, projection: Projection) -> Self {
+        if self.unknown {
+            return self.clone();
+        }
+        let mut result = Self {
+            fresh: self.fresh,
+            ..Self::default()
+        };
+        for alias in &self.aliases {
+            let mut alias = alias.clone();
+            if alias.result_path.first() == Some(&projection) {
+                alias.result_path.remove(0);
+            } else if alias.result_path.is_empty() {
+                alias.parameter_path.push(projection.clone());
+            } else {
+                continue;
+            }
+            result.aliases.insert(alias);
+        }
+        result.bounded()
+    }
+    fn contain(&self, projection: Projection) -> Self {
+        let mut result = self.clone();
+        result.aliases = result
+            .aliases
+            .into_iter()
+            .map(|mut a| {
+                a.result_path.insert(0, projection.clone());
+                a
+            })
+            .collect();
+        result.bounded()
+    }
+    fn substitute(&self, args: &[Self], mut excluded_parameters: BTreeSet<usize>) -> Self {
+        if self.unknown {
+            for (index, actual) in args.iter().enumerate() {
+                if !self.may_share(index) {
+                    continue;
+                }
+                if actual.unknown {
+                    excluded_parameters
+                        .retain(|parameter| actual.excluded_parameters.contains(parameter));
+                } else {
+                    for alias in &actual.aliases {
+                        excluded_parameters.remove(&alias.parameter);
+                    }
+                }
+            }
+            return Self {
+                excluded_parameters,
+                ..Self::unknown()
+            };
+        }
+        let mut result = Self {
+            fresh: self.fresh,
+            ..Self::default()
+        };
+        for alias in &self.aliases {
+            let mut actual = args[alias.parameter].clone();
+            for projection in &alias.parameter_path {
+                actual = actual.project(projection.clone());
+            }
+            for projection in alias.result_path.iter().rev() {
+                actual = actual.contain(projection.clone());
+            }
+            result.join(&actual);
+        }
+        result
+    }
+}
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(crate) enum SummarySource {
+    Unanalyzed,
+    Inferred,
+    Opaque,
+    NativeContract,
+    ExternContract,
+}
+impl SummarySource {
+    fn has_contract(&self) -> bool {
+        matches!(self, Self::NativeContract | Self::ExternContract)
+    }
+}
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(crate) struct Summary {
+    pub source: SummarySource,
+    pub parameters: Vec<ParameterEffects>,
+    pub returned: ReturnOrigins,
+    pub io: Effect,
+    pub external_write: Effect,
+    pub may_fail: Effect,
+    pub may_diverge: Effect,
+}
+impl Summary {
+    pub fn unanalyzed(parameters: usize) -> Self {
+        Self::unknown(parameters, SummarySource::Unanalyzed)
+    }
+    fn unknown(parameters: usize, source: SummarySource) -> Self {
+        Self {
+            source,
+            parameters: vec![ParameterEffects::unknown(); parameters],
+            returned: ReturnOrigins::unknown(),
+            io: Effect::Unknown,
+            external_write: Effect::Unknown,
+            may_fail: Effect::Unknown,
+            may_diverge: Effect::Unknown,
+        }
+    }
+    pub fn opaque(parameters: usize) -> Self {
+        Self::unknown(parameters, SummarySource::Opaque)
+    }
+    pub fn native(parameters: usize) -> Self {
+        Self {
+            source: SummarySource::NativeContract,
+            ..Self::inferred(parameters)
+        }
+    }
+    pub fn external(guarantees: &[(bool, bool)]) -> Self {
+        let mut summary = Self::unknown(guarantees.len(), SummarySource::ExternContract);
+        for (index, &(readonly, noescape)) in guarantees.iter().enumerate() {
+            let parameter = &mut summary.parameters[index];
+            if readonly {
+                parameter.write = Effect::No;
+                parameter.structural = Effect::No;
+            }
+            if noescape {
+                parameter.escape = Effect::No;
+                parameter.retained = Effect::No;
+                summary.returned.excluded_parameters.insert(index);
+            }
+        }
+        summary
+    }
+    fn inferred(parameters: usize) -> Self {
+        Self {
+            source: SummarySource::Inferred,
+            parameters: vec![ParameterEffects::default(); parameters],
+            returned: ReturnOrigins::default(),
+            io: Effect::No,
+            external_write: Effect::No,
+            may_fail: Effect::No,
+            may_diverge: Effect::No,
+        }
+    }
+    pub fn validate(&self, parameters: usize) -> Result<(), String> {
+        if matches!(
+            self.source,
+            SummarySource::Opaque | SummarySource::Unanalyzed
+        ) && *self != Self::unknown(parameters, self.source.clone())
+        {
+            return Err("opaque or unanalyzed effects must be unknown".into());
+        }
+        if self.parameters.len() != parameters {
+            return Err("invalid effect summary parameter count".into());
+        }
+        if self
+            .returned
+            .aliases
+            .iter()
+            .any(|a| a.parameter >= parameters)
+            || self
+                .returned
+                .excluded_parameters
+                .iter()
+                .any(|&parameter| !self.returned.unknown || parameter >= parameters)
+        {
+            return Err("invalid effect summary return parameter".into());
+        }
+        if self
+            .parameters
+            .iter()
+            .enumerate()
+            .any(|(index, parameter)| {
+                parameter.escape == Effect::No && self.returned.may_share(index)
+            })
+        {
+            return Err("effect summary loses return escape".into());
+        }
+        if self.parameters.iter().any(|p| p.retained > p.escape) {
+            return Err("effect summary loses retained escape".into());
+        }
+        if self.returned.clone().bounded() != self.returned {
+            return Err("invalid effect summary provenance bounds".into());
+        }
+        Ok(())
+    }
+    pub fn validate_signature(
+        &self,
+        parameters: &[String],
+        result: &str,
+        types: &BTreeMap<String, crate::ir::hir::Type>,
+        has_body: bool,
+    ) -> Result<(), String> {
+        self.validate(parameters.len())?;
+        if !has_body && self.source == SummarySource::Inferred {
+            return Err("cannot infer effects for an opaque body".into());
+        }
+        if has_body && self.source.has_contract() {
+            return Err("native contract requires an opaque body".into());
+        }
+        for alias in &self.returned.aliases {
+            let source = project_type(&parameters[alias.parameter], &alias.parameter_path, types)?;
+            let target = project_type(result, &alias.result_path, types)?;
+            if source != target {
+                return Err("effect summary alias type mismatch".into());
+            }
+        }
+        Ok(())
+    }
+    fn affect(&mut self, value: &ReturnOrigins, effect: &ParameterEffects) {
+        if value.unknown {
+            let uncertain = |effect| {
+                if effect == Effect::No {
+                    Effect::No
+                } else {
+                    Effect::Unknown
+                }
+            };
+            let effect = ParameterEffects {
+                read: uncertain(effect.read),
+                write: uncertain(effect.write),
+                structural: uncertain(effect.structural),
+                escape: uncertain(effect.escape),
+                retained: uncertain(effect.retained),
+            };
+            for (index, parameter) in self.parameters.iter_mut().enumerate() {
+                if value.may_share(index) {
+                    parameter.join(&effect);
+                }
+            }
+        } else {
+            for origin in &value.aliases {
+                self.parameters[origin.parameter].join(effect);
+            }
+        }
+    }
+    fn join(&mut self, other: &Self) {
+        for (parameter, other) in self.parameters.iter_mut().zip(&other.parameters) {
+            parameter.join(other);
+        }
+        self.join_returned(&other.returned);
+        self.io.join(other.io);
+        self.external_write.join(other.external_write);
+        self.may_fail.join(other.may_fail);
+        self.may_diverge.join(other.may_diverge);
+    }
+    fn join_returned(&mut self, other: &ReturnOrigins) {
+        self.returned.join(other);
+        // The union of precise paths may widen beyond those seen on any one
+        // return. Keep the escape summary conservative for the widened paths.
+        if self.returned.unknown {
+            for (index, parameter) in self.parameters.iter_mut().enumerate() {
+                if parameter.escape == Effect::No && self.returned.may_share(index) {
+                    parameter.escape = Effect::Unknown;
+                }
+            }
+        }
+    }
+}
+pub(crate) fn project_type(
+    root: &str,
+    path: &[Projection],
+    types: &BTreeMap<String, crate::ir::hir::Type>,
+) -> Result<String, String> {
+    let mut ty = root.to_string();
+    for projection in path {
+        ty = match (types.get(&ty), projection) {
+            (
+                Some(crate::ir::hir::Type::Vector(element) | crate::ir::hir::Type::Buffer(element)),
+                Projection::Element,
+            ) => Some(element.clone()),
+            (Some(kind), Projection::Retained(index)) => {
+                kind.retained_fields().get(*index).map(|(_, ty)| ty.clone())
+            }
+            (Some(kind), Projection::Field(index)) => kind
+                .fields()
+                .and_then(|fields| fields.get(*index))
+                .map(|(_, ty)| ty.clone()),
+            (
+                Some(crate::ir::hir::Type::Enum(variants)),
+                Projection::VariantField { variant, field },
+            ) => variants
+                .get(*variant)
+                .and_then(|(_, fields)| fields.get(*field))
+                .cloned(),
+            _ => None,
+        }
+        .ok_or("invalid effect summary projection")?;
+    }
+    Ok(ty)
+}
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+struct ParameterRoots {
+    whole: Option<usize>,
+    nested: BTreeSet<usize>,
+}
+impl ParameterRoots {
+    fn iter(&self) -> impl Iterator<Item = usize> + '_ {
+        self.whole.into_iter().chain(self.nested.iter().copied())
+    }
+    fn intersect(&mut self, other: &Self) {
+        if self.whole != other.whole {
+            self.whole = None;
+        }
+        self.nested.retain(|index| other.nested.contains(index));
+    }
+    fn is_empty(&self) -> bool {
+        self.whole.is_none() && self.nested.is_empty()
+    }
+}
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+struct State {
+    values: BTreeMap<ValueId, ReturnOrigins>,
+    /// Whole incoming objects known to be held by a binding, directly or
+    /// through aggregate members. This proof is independent of call summaries.
+    parameter_roots: BTreeMap<ValueId, ParameterRoots>,
+    /// Member stores and opaque calls currently invalidate heap projections.
+    /// A later field-sensitive heap analysis can replace this conservative top.
+    heap_unknown: bool,
+    has_heap_facts: bool,
+}
+impl State {
+    fn initial(parameters: usize) -> Self {
+        Self {
+            values: (0..parameters)
+                .map(|i| (ValueId::Parameter(i), ReturnOrigins::parameter(i)))
+                .collect(),
+            parameter_roots: (0..parameters)
+                .map(|i| {
+                    (
+                        ValueId::Parameter(i),
+                        ParameterRoots {
+                            whole: Some(i),
+                            ..ParameterRoots::default()
+                        },
+                    )
+                })
+                .collect(),
+            heap_unknown: false,
+            has_heap_facts: false,
+        }
+    }
+    fn get(&self, value: &Value) -> ReturnOrigins {
+        self.values
+            .get(&value.id)
+            .cloned()
+            .unwrap_or_else(ReturnOrigins::unknown)
+    }
+    fn returned(
+        &self,
+        value: &Value,
+        types: &BTreeMap<String, crate::ir::hir::Type>,
+    ) -> ReturnOrigins {
+        let origins = self.get(value);
+        if self.heap_unknown
+            && !origins.unknown
+            && !types.get(&value.ty).is_some_and(crate::ir::hir::Type::leaf)
+        {
+            ReturnOrigins::unknown()
+        } else {
+            origins
+        }
+    }
+    fn bind(&mut self, target: &ValueId, source: Option<&Value>, origins: ReturnOrigins) {
+        let roots = source.and_then(|source| self.parameter_roots.get(&source.id).cloned());
+        if let Some(roots) = roots {
+            self.parameter_roots.insert(target.clone(), roots);
+        } else {
+            self.parameter_roots.remove(target);
+        }
+        self.has_heap_facts |= !origins.excluded_parameters.is_empty();
+        self.values.insert(target.clone(), origins);
+    }
+    fn invalidate_heap(&mut self) {
+        self.heap_unknown = true;
+        if !std::mem::take(&mut self.has_heap_facts) {
+            return;
+        }
+        for origins in self.values.values_mut() {
+            origins.excluded_parameters.clear();
+        }
+        self.parameter_roots.retain(|_, roots| {
+            roots.nested.clear();
+            !roots.is_empty()
+        });
+    }
+    fn join(&mut self, other: &Self) -> bool {
+        let old = self.clone();
+        self.heap_unknown |= other.heap_unknown;
+        self.has_heap_facts |= other.has_heap_facts;
+        self.parameter_roots.retain(|id, roots| {
+            if let Some(other) = other.parameter_roots.get(id) {
+                roots.intersect(other);
+                !roots.is_empty()
+            } else {
+                false
+            }
+        });
+        for (id, value) in &other.values {
+            let Some(entry) = self.values.get_mut(id) else {
+                self.values.insert(id.clone(), value.clone());
+                continue;
+            };
+            if self.heap_unknown
+                && ((!entry.excluded_parameters.is_empty() && !value.unknown)
+                    || (!value.excluded_parameters.is_empty() && !entry.unknown))
+            {
+                // A precise origin from the other path can hide additional
+                // references after heap mutation.
+                *entry = ReturnOrigins::unknown();
+            } else {
+                entry.join(value);
+            }
+        }
+        *self != old
+    }
+}
+fn read(summary: &mut Summary, origins: &ReturnOrigins) {
+    summary.affect(
+        origins,
+        &ParameterEffects {
+            read: Effect::May,
+            ..ParameterEffects::default()
+        },
+    );
+}
+fn escapes(summary: &mut Summary, origins: &ReturnOrigins) {
+    summary.affect(
+        origins,
+        &ParameterEffects {
+            escape: Effect::May,
+            ..ParameterEffects::default()
+        },
+    );
+}
+fn operation(
+    op: &Operation,
+    state: &mut State,
+    summary: &mut Summary,
+    callees: &[Summary],
+    private: &BTreeSet<ValueId>,
+    types: &BTreeMap<String, crate::ir::hir::Type>,
+) {
+    match op {
+        Operation::Literal { result, .. } => {
+            state.bind(&result.id, None, ReturnOrigins::fresh());
+        }
+        Operation::Declare { result, initial } => {
+            let value = initial.as_ref().map(|v| state.get(v)).unwrap_or_default();
+            state.bind(&result.id, initial.as_ref(), value);
+        }
+        Operation::Object { result, expression } => {
+            let value = match expression {
+                Rvalue::Share(value) => state.get(value),
+                Rvalue::BoolCopy(value) => {
+                    read(summary, &state.get(value));
+                    ReturnOrigins::fresh()
+                }
+                Rvalue::Field { owner, index } => {
+                    let owner = state.get(owner);
+                    read(summary, &owner);
+                    if state.heap_unknown && !owner.unknown {
+                        ReturnOrigins::unknown()
+                    } else {
+                        owner.project(Projection::Field(*index))
+                    }
+                }
+                Rvalue::VariantField {
+                    owner,
+                    variant,
+                    index,
+                } => {
+                    let owner = state.get(owner);
+                    read(summary, &owner);
+                    if state.heap_unknown && !owner.unknown {
+                        ReturnOrigins::unknown()
+                    } else {
+                        owner.project(Projection::VariantField {
+                            variant: *variant,
+                            field: *index,
+                        })
+                    }
+                }
+                Rvalue::VariantTest { owner, .. } => {
+                    read(summary, &state.get(owner));
+                    ReturnOrigins::fresh()
+                }
+                Rvalue::Aggregate(fields) | Rvalue::Variant { fields, .. } => {
+                    let mut value = ReturnOrigins::fresh();
+                    let scoped = fields
+                        .iter()
+                        .any(|field| !state.get(field).excluded_parameters.is_empty());
+                    for (index, field) in fields.iter().enumerate() {
+                        let projection = match expression {
+                            Rvalue::Variant { index: variant, .. } => Projection::VariantField {
+                                variant: *variant,
+                                field: index,
+                            },
+                            _ => Projection::Field(index),
+                        };
+                        let field = if scoped {
+                            state.returned(field, types)
+                        } else {
+                            state.get(field)
+                        };
+                        value.join(&field.contain(projection));
+                    }
+                    value
+                }
+            };
+            let source = match expression {
+                Rvalue::Share(source) => Some(source),
+                _ => None,
+            };
+            state.bind(&result.id, source, value);
+            if let Rvalue::Aggregate(fields) | Rvalue::Variant { fields, .. } = expression {
+                let nested: BTreeSet<_> = fields
+                    .iter()
+                    .filter_map(|field| state.parameter_roots.get(&field.id))
+                    .flat_map(ParameterRoots::iter)
+                    .collect();
+                if !nested.is_empty() {
+                    state.has_heap_facts = true;
+                    state.parameter_roots.insert(
+                        result.id.clone(),
+                        ParameterRoots {
+                            whole: None,
+                            nested,
+                        },
+                    );
+                }
+            }
+        }
+        Operation::Rebind { target, value, .. } => {
+            let origins = state.get(value);
+            match target {
+                Place::Local(id) => {
+                    state.bind(id, Some(value), origins);
+                }
+                Place::Field { owner, .. } => {
+                    summary.affect(
+                        &state.get(owner),
+                        &ParameterEffects {
+                            write: Effect::May,
+                            ..ParameterEffects::default()
+                        },
+                    );
+                    // A function-wide proof rules out publication of these
+                    // destinations through any alias. Other stores can retain
+                    // the value outside the call, including stores performed
+                    // before an eventual publication of their destination.
+                    if !private.contains(&owner.id) {
+                        summary.affect(
+                            &origins,
+                            &ParameterEffects {
+                                escape: Effect::May,
+                                retained: Effect::May,
+                                ..ParameterEffects::default()
+                            },
+                        );
+                    }
+                    state.invalidate_heap();
+                }
+            }
+        }
+        Operation::StoreBool { target, value } => {
+            read(summary, &state.get(value));
+            summary.affect(
+                &state.get(target),
+                &ParameterEffects {
+                    write: Effect::May,
+                    ..ParameterEffects::default()
+                },
+            );
+        }
+        Operation::Call(call) => {
+            let callee = &callees[call.function];
+            let excluded_parameters = callee
+                .returned
+                .excluded_parameters
+                .iter()
+                .filter_map(|&index| state.parameter_roots.get(&call.args[index].id))
+                .flat_map(ParameterRoots::iter)
+                .collect();
+            let mut args: Vec<_> = call.args.iter().map(|v| state.get(v)).collect();
+            for (actual, effect) in args.iter().zip(&callee.parameters) {
+                let mut passed = effect.clone();
+                // Returning a reference only escapes the callee. The caller's
+                // uses of that result determine whether it escapes again.
+                passed.escape = effect.retained;
+                summary.affect(actual, &passed);
+            }
+            summary.io.join(callee.io);
+            summary.external_write.join(callee.external_write);
+            if callee.external_write != Effect::No
+                || callee
+                    .parameters
+                    .iter()
+                    .any(|p| p.write != Effect::No || p.structural != Effect::No)
+            {
+                state.invalidate_heap();
+                for arg in &mut args {
+                    arg.excluded_parameters.clear();
+                }
+            }
+            summary.may_fail.join(callee.may_fail);
+            summary.may_diverge.join(callee.may_diverge);
+            let returned = if !callee.returned.excluded_parameters.is_empty() {
+                let args: Vec<_> = call
+                    .args
+                    .iter()
+                    .map(|arg| state.returned(arg, types))
+                    .collect();
+                callee.returned.substitute(&args, excluded_parameters)
+            } else if state.heap_unknown
+                && callee
+                    .returned
+                    .aliases
+                    .iter()
+                    .any(|alias| !alias.parameter_path.is_empty())
+            {
+                ReturnOrigins::unknown()
+            } else {
+                callee.returned.substitute(&args, BTreeSet::new())
+            };
+            state.bind(&call.result.id, None, returned);
+        }
+        Operation::Release(_)
+        | Operation::DescribeBinding { .. }
+        | Operation::AnnotateBinding { .. }
+        | Operation::AnnotateAccess { .. }
+        | Operation::AnnotateEscape { .. } => {}
+    }
+}
+fn analyze_function(
+    function: &lir::ProgramFunction,
+    callees: &[Summary],
+    private: &BTreeSet<ValueId>,
+    types: &BTreeMap<String, crate::ir::hir::Type>,
+) -> Summary {
+    let Some(body) = &function.body else {
+        return if function.effects.source.has_contract() {
+            function.effects.clone()
+        } else {
+            Summary::unknown(function.params.len(), SummarySource::Opaque)
+        };
+    };
+    let mut summary = Summary::inferred(function.params.len());
+    let initial = State::initial(function.params.len());
+    let mut entries = vec![None; body.blocks.len()];
+    entries[0] = Some(initial);
+    let mut pending = VecDeque::from([0]);
+    while let Some(index) = pending.pop_front() {
+        let mut state = entries[index].as_ref().unwrap().clone();
+        let block = &body.blocks[index];
+        for op in &block.instructions {
+            operation(op, &mut state, &mut summary, callees, private, types);
+        }
+        let mut successors = vec![];
+        match &block.terminator {
+            Terminator::Jump(target) => {
+                successors.push(target.0);
+            }
+            Terminator::Branch { condition, yes, no } => {
+                read(&mut summary, &state.get(condition));
+                successors.extend([yes.0, no.0]);
+            }
+            Terminator::Return {
+                value: Some(value), ..
+            } => {
+                // Mutated aggregates may retain sources beyond their initial fields.
+                let origins = state.returned(value, types);
+                escapes(&mut summary, &origins);
+                summary.join_returned(&origins);
+            }
+            Terminator::Return { value: None, .. } | Terminator::Unreachable => {}
+        }
+        for successor in successors {
+            let changed = match &mut entries[successor] {
+                Some(entry) => entry.join(&state),
+                entry @ None => {
+                    *entry = Some(state.clone());
+                    true
+                }
+            };
+            if changed {
+                pending.push_back(successor);
+            }
+        }
+    }
+    // A backward-numbered edge can be an acyclic join. Detect actual cycles
+    // among reachable blocks rather than depending on lowering's numbering.
+    let mut indegree = vec![0usize; body.blocks.len()];
+    let successors = |index: usize| -> Vec<usize> {
+        match &body.blocks[index].terminator {
+            Terminator::Jump(target) => vec![target.0],
+            Terminator::Branch { yes, no, .. } => vec![yes.0, no.0],
+            _ => vec![],
+        }
+    };
+    for (index, entry) in entries.iter().enumerate() {
+        if entry.is_some() {
+            for target in successors(index) {
+                indegree[target] += 1;
+            }
+        }
+    }
+    let reachable = entries.iter().filter(|entry| entry.is_some()).count();
+    let mut ready: VecDeque<_> = (0..entries.len())
+        .filter(|&index| entries[index].is_some() && indegree[index] == 0)
+        .collect();
+    let mut visited = 0;
+    while let Some(index) = ready.pop_front() {
+        visited += 1;
+        for target in successors(index) {
+            indegree[target] -= 1;
+            if indegree[target] == 0 {
+                ready.push_back(target);
+            }
+        }
+    }
+    if visited < reachable {
+        summary.may_diverge.join(Effect::May);
+    }
+    summary
+}
+#[derive(Debug)]
+struct EscapeWitness {
+    span: Option<crate::frontend::ast::Span>,
+    effect: Effect,
+    reason: String,
+    route: String,
+}
+fn origin_route(origins: &ReturnOrigins, parameter: usize) -> String {
+    if origins.unknown {
+        return "sharing origin is unknown (heap mutation, opaque call or analysis limit)".into();
+    }
+    if let Some(alias) = origins.aliases.iter().find(|a| a.parameter == parameter) {
+        format!(
+            "parameter {} -> {:?} -> contained at {:?}",
+            parameter + 1,
+            alias.parameter_path,
+            alias.result_path
+        )
+    } else {
+        "through a derived alias or a retained value".into()
+    }
+}
+fn first_escape(
+    function: &lir::ProgramFunction,
+    callees: &[Summary],
+    parameter: usize,
+    program: &lir::Program,
+    private: &[BTreeSet<ValueId>],
+) -> Option<EscapeWitness> {
+    let body = function.body.as_ref()?;
+    let context = routes::Context {
+        program,
+        callees,
+        private,
+    };
+    let initial = State::initial(function.params.len());
+    let mut entries = vec![None; body.blocks.len()];
+    entries[0] = Some((initial, routes::Routes::new(body, parameter)));
+    let mut pending = VecDeque::from([0]);
+    while let Some(index) = pending.pop_front() {
+        let (mut state, mut routes) = entries[index].as_ref().unwrap().clone();
+        let block = &body.blocks[index];
+        for op in &block.instructions {
+            let before = state.clone();
+            let mut step = Summary::inferred(function.params.len());
+            operation(
+                op,
+                &mut state,
+                &mut step,
+                callees,
+                &private[function.id],
+                &program.types,
+            );
+            routes.operation(op, &before, &state, callees, program);
+            if step.parameters[parameter].escape != Effect::No {
+                let (span, effect, reason, route) = match op {
+                    Operation::Call(call) => {
+                        let callee = &program.functions[call.function];
+                        let actual = call.args.iter().enumerate().find(|(i, arg)| {
+                            let origin = before.get(arg);
+                            callee.effects.parameters[*i].retained != Effect::No
+                                && origin.may_share(parameter)
+                        });
+                        let (argument, route) = actual
+                            .map(|(i, arg)| {
+                                (
+                                    format!("argument {}", i + 1),
+                                    format!(
+                                        "{}{}",
+                                        origin_route(&before.get(arg), parameter),
+                                        routes.retained(
+                                            arg,
+                                            &before.get(arg),
+                                            parameter,
+                                            call.function,
+                                            i,
+                                            &context
+                                        )
+                                    ),
+                                )
+                            })
+                            .unwrap_or(("argument".into(), "unknown retention path".into()));
+                        (
+                            Some(call.span.clone()),
+                            step.parameters[parameter].escape,
+                            format!(
+                                "{argument} of '{}' may be retained outside the call",
+                                callee.name
+                            ),
+                            route,
+                        )
+                    }
+                    Operation::Rebind {
+                        target: Place::Field { owner, index },
+                        value,
+                        span,
+                    } => (
+                        span.clone(),
+                        Effect::Unknown,
+                        format!(
+                            "a field store to {} may retain the shared value beyond this call; destination is not proven private",
+                            routes::projection_name(&owner.ty, &Projection::Field(*index), program)
+                        ),
+                        format!(
+                            "{}{}",
+                            origin_route(&before.get(value), parameter),
+                            routes.describe(value, &before.get(value), parameter, &context)
+                        ),
+                    ),
+                    _ => (
+                        None,
+                        step.parameters[parameter].escape,
+                        "an operation may retain the parameter".into(),
+                        "unknown retention path".into(),
+                    ),
+                };
+                return Some(EscapeWitness {
+                    span,
+                    effect,
+                    reason,
+                    route,
+                });
+            }
+        }
+        let next = match &block.terminator {
+            Terminator::Jump(target) => vec![target.0],
+            Terminator::Branch { yes, no, .. } => vec![yes.0, no.0],
+            Terminator::Return {
+                value: Some(value),
+                span,
+                ..
+            } => {
+                let origins = state.returned(value, &program.types);
+                let mut step = Summary::inferred(function.params.len());
+                escapes(&mut step, &origins);
+                if step.parameters[parameter].escape != Effect::No {
+                    return Some(EscapeWitness {
+                        span: span.clone(),
+                        effect: step.parameters[parameter].escape,
+                        reason: "the return value may share the parameter, one of its elements or a captured value".into(),
+                        route: format!("{}{}", origin_route(&origins, parameter), routes.describe(value, &origins, parameter, &context)),
+                    });
+                }
+                vec![]
+            }
+            _ => vec![],
+        };
+        for next in next {
+            let changed = match &mut entries[next] {
+                Some((entry, paths)) => {
+                    let state_changed = entry.join(&state);
+                    let routes_changed = paths.join(&routes);
+                    state_changed || routes_changed
+                }
+                slot @ None => {
+                    *slot = Some((state.clone(), routes.clone()));
+                    true
+                }
+            };
+            if changed {
+                pending.push_back(next);
+            }
+        }
+    }
+    None
+}
+/// Annotations assert an inferred fact; they never replace an unknown effect
+/// with an optimistic one. Returning a value is distinguished from a callee
+/// merely returning an alias which the caller later copies or discards.
+pub(crate) fn validate_noescape(program: &lir::Program) -> Result<(), String> {
+    for function in &program.functions {
+        let Some(body) = &function.body else {
+            continue;
+        };
+        for block in &body.blocks {
+            for op in &block.instructions {
+                let Operation::AnnotateEscape { parameter, info } = op else {
+                    continue;
+                };
+                if info.annotation.mode != crate::frontend::ast::EscapeMode::Noescape
+                    || function.effects.parameters[*parameter].escape == Effect::No
+                {
+                    continue;
+                }
+                let callees: Vec<_> = program
+                    .functions
+                    .iter()
+                    .map(|f| f.effects.clone())
+                    .collect();
+                // Reconstruct the same frozen proof used by inference, rather
+                // than deriving a different proof from the final summaries.
+                let structural = private_plans(program, None);
+                let baseline = solve(program, &structural);
+                let plans = private_plans(program, Some(&baseline));
+                let witness = first_escape(function, &callees, *parameter, program, &plans);
+                let span = witness
+                    .as_ref()
+                    .and_then(|w| w.span.as_ref())
+                    .unwrap_or(&info.declaration);
+                let effect = witness.as_ref().map_or(Effect::Unknown, |w| w.effect);
+                let message = if effect == Effect::Unknown {
+                    format!("cannot prove noescape for parameter '{}'", info.name)
+                } else {
+                    format!("noescape parameter '{}' may escape", info.name)
+                };
+                let detail = witness
+                    .as_ref()
+                    .map(|w| format!("{}\nthrough {}", w.reason, w.route))
+                    .unwrap_or_else(|| "inferred sharing effects are unknown".into());
+                return Err(format!(
+                    "{}\n{}\n{}\n{}\nwhile checking noescape in '{}'",
+                    span.error(message),
+                    info.declaration.error("parameter declared here"),
+                    info.annotation.span.error("noescape modifier is here"),
+                    detail,
+                    function.name
+                ));
+            }
+        }
+    }
+    Ok(())
+}
+fn private_plans(program: &lir::Program, callees: Option<&[Summary]>) -> Vec<BTreeSet<ValueId>> {
+    program
+        .functions
+        .iter()
+        .map(|function| {
+            function
+                .body
+                .as_ref()
+                .map(|body| private::destinations(body, callees))
+                .unwrap_or_default()
+        })
+        .collect()
+}
+
+pub(crate) fn analyze(program: &lir::Program) -> Vec<Summary> {
+    // Freeze call facts before using them to prove private stores. Otherwise a
+    // store's retention and the proof permitting that store could depend on
+    // one another, making the recursive equation non-monotone.
+    let structural = private_plans(program, None);
+    let baseline = solve(program, &structural);
+    let refined = private_plans(program, Some(&baseline));
+    if refined == structural {
+        baseline
+    } else {
+        solve(program, &refined)
+    }
+}
+
+/// Solve recursive calls with fixed private destinations. Return provenance
+/// starts at bottom; unbounded paths and alias sets widen to unknown.
+fn solve(program: &lir::Program, private: &[BTreeSet<ValueId>]) -> Vec<Summary> {
+    let mut summaries: Vec<_> = program
+        .functions
+        .iter()
+        .map(|f| {
+            if f.body.is_some() {
+                Summary::inferred(f.params.len())
+            } else {
+                if f.effects.source.has_contract() {
+                    f.effects.clone()
+                } else {
+                    Summary::unknown(f.params.len(), SummarySource::Opaque)
+                }
+            }
+        })
+        .collect();
+    // Any function on a call cycle may diverge. Propagation below also marks
+    // callers; no optimistic termination claim is used to erase such calls.
+    let edges: Vec<BTreeSet<usize>> = program
+        .functions
+        .iter()
+        .map(|f| {
+            f.body
+                .as_ref()
+                .into_iter()
+                .flat_map(|b| &b.blocks)
+                .flat_map(|b| &b.instructions)
+                .filter_map(|op| {
+                    if let Operation::Call(c) = op {
+                        Some(c.function)
+                    } else {
+                        None
+                    }
+                })
+                .collect()
+        })
+        .collect();
+    let recursive: Vec<_> = (0..edges.len())
+        .map(|root| {
+            let mut todo: Vec<_> = edges[root].iter().copied().collect();
+            let mut seen = BTreeSet::new();
+            while let Some(id) = todo.pop() {
+                if id == root {
+                    return true;
+                }
+                if seen.insert(id) {
+                    todo.extend(&edges[id]);
+                }
+            }
+            false
+        })
+        .collect();
+    loop {
+        let mut next: Vec<_> = program
+            .functions
+            .iter()
+            .map(|f| analyze_function(f, &summaries, &private[f.id], &program.types))
+            .collect();
+        for (i, recursive) in recursive.iter().enumerate() {
+            if *recursive {
+                // A new scoped return may refine a previous heap widening.
+                // Keep the recursive approximation ascending through cycles.
+                next[i].join(&summaries[i]);
+                next[i].may_diverge.join(Effect::May);
+            }
+        }
+        if next == summaries {
+            return next;
+        }
+        summaries = next;
+    }
+}
+
+#[cfg(test)]
+mod tests;

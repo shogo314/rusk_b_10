@@ -1,0 +1,236 @@
+use super::*;
+
+impl Compiler {
+    pub(super) fn conditional<F, G>(
+        &mut self,
+        condition: Value,
+        expected: Option<&str>,
+        yes: F,
+        no: G,
+        span: &Span,
+    ) -> Result<Value, String>
+    where
+        F: FnOnce(&mut Self, Option<&str>) -> Result<Value, String>,
+        G: FnOnce(&mut Self, Option<&str>) -> Result<Value, String>,
+    {
+        if self.context.diverged {
+            return Ok(Value::never());
+        }
+        self.same("Bool", &condition.ty, span)?;
+        let slot = self.temp();
+        let outer_body = std::mem::take(&mut self.context.body);
+        let outer_temps = std::mem::take(&mut self.context.pending_temps);
+        let before = self.context.scopes.clone();
+        let a = yes(self, expected)?;
+        let yes_exit = self.context.diverged;
+        if !yes_exit {
+            if let Some(expected) = expected {
+                self.same(expected, &a.ty, span)?;
+            }
+            self.context.body.push(Instruction::Rebind {
+                span: None,
+                target: Place::Local(slot.clone()),
+                value: a.clone(),
+            });
+            self.release_temps();
+        }
+        let yes_body = std::mem::take(&mut self.context.body);
+        let yes_scopes = self.context.scopes.clone();
+        self.context.scopes = before;
+        self.context.diverged = false;
+        let hint = if yes_exit {
+            expected
+        } else {
+            Some(a.ty.as_str())
+        };
+        let b = no(self, hint)?;
+        let no_exit = self.context.diverged;
+        if !no_exit {
+            if let Some(hint) = hint {
+                self.same(hint, &b.ty, span)?;
+            }
+            self.context.body.push(Instruction::Rebind {
+                span: None,
+                target: Place::Local(slot.clone()),
+                value: b.clone(),
+            });
+            self.release_temps();
+        }
+        let no_body = std::mem::take(&mut self.context.body);
+        if yes_exit {
+        } else if no_exit {
+            self.context.scopes = yes_scopes;
+        } else {
+            self.intersect_initialization(&yes_scopes);
+        }
+        self.context.body = outer_body;
+        self.context.pending_temps = outer_temps;
+        self.context.diverged = yes_exit && no_exit;
+        let result = if self.context.diverged {
+            Value::never()
+        } else {
+            Value {
+                id: slot,
+                ty: if yes_exit { b.ty } else { a.ty },
+            }
+        };
+        if !self.context.diverged {
+            self.context.body.push(Instruction::Declare {
+                result: result.clone(),
+                initial: None,
+            });
+            self.context.pending_temps.push(result.id.clone());
+        }
+        self.context.body.push(Instruction::If {
+            condition,
+            yes: yes_body,
+            no: no_body,
+        });
+        Ok(result)
+    }
+
+    pub(super) fn if_expression(
+        &mut self,
+        condition: &Condition,
+        yes: &Expr,
+        no: &Expr,
+        expected: Option<&str>,
+        span: &Span,
+    ) -> Result<Value, String> {
+        let (condition, bindings) = self.pattern_condition(condition)?;
+        self.conditional(
+            condition,
+            expected,
+            |c, hint| c.scoped_pattern_values(&bindings, |c| c.expr(yes, hint)),
+            |c, ty| c.expr(no, ty),
+            span,
+        )
+    }
+
+    pub(super) fn coalesce(
+        &mut self,
+        left: &Expr,
+        right: &Expr,
+        expected: Option<&str>,
+        span: &Span,
+    ) -> Result<Value, String> {
+        let hints = self.argument_hints("__coalesce_value__", 1, &[], expected);
+        let hints = hints
+            .into_iter()
+            .filter(|ty| self.expression_accepts_hint(left, ty))
+            .collect::<Vec<_>>();
+        let hint = (hints.len() == 1).then(|| hints[0].as_str());
+        let value = self.expr(left, hint)?;
+        if self.context.diverged {
+            return Ok(Value::never());
+        }
+        let getter = self
+            .resolve_callable(
+                "__coalesce_value__",
+                std::slice::from_ref(&value),
+                expected,
+                span,
+            )?
+            .ok_or_else(|| {
+                span.error(format!(
+                    "no matching coalesce value operation for '{}'",
+                    value.ty
+                ))
+            })?;
+        let element = self.functions[getter].result.clone();
+        let test = self
+            .resolve_callable(
+                "__coalesce_test__",
+                std::slice::from_ref(&value),
+                Some("Bool"),
+                span,
+            )?
+            .ok_or_else(|| {
+                span.error(format!(
+                    "no matching coalesce test operation for '{}'",
+                    value.ty
+                ))
+            })?;
+        self.same("Bool", &self.functions[test].result, span)?;
+        let direct = self.guarded_enum_field(test, getter);
+        let condition = if let Some((variant, _)) = direct {
+            self.emit(
+                "Bool",
+                Rvalue::VariantTest {
+                    owner: value.clone(),
+                    index: variant,
+                },
+            )
+        } else {
+            self.call("__coalesce_test__", vec![value.clone()], Some("Bool"), span)?
+        };
+        self.conditional(
+            condition,
+            Some(&element),
+            |c, _| {
+                if let Some((variant, index)) = direct {
+                    Ok(c.emit(
+                        &element,
+                        Rvalue::VariantField {
+                            owner: value,
+                            variant,
+                            index,
+                        },
+                    ))
+                } else {
+                    c.call("__coalesce_value__", vec![value], Some(&element), span)
+                }
+            },
+            |c, ty| c.expr(right, ty),
+            span,
+        )
+    }
+
+    pub(super) fn comparison_chain(
+        &mut self,
+        first: &Expr,
+        rest: &[(String, Expr, Span)],
+        span: &Span,
+    ) -> Result<Value, String> {
+        let first = self.expr(first, None)?;
+        let result = self.literal("Bool", "true", span)?;
+        self.chain_step(first, rest, &result)?;
+        Ok(result)
+    }
+    fn chain_step(
+        &mut self,
+        left: Value,
+        rest: &[(String, Expr, Span)],
+        result: &Value,
+    ) -> Result<(), String> {
+        let (op, right, span) = &rest[0];
+        let right = self.expr(right, None)?;
+        if self.context.diverged {
+            return Ok(());
+        }
+        let value = self.call(binary_name(op), vec![left, right.clone()], None, span)?;
+        self.same("Bool", &value.ty, span)?;
+        self.context.body.push(Instruction::StoreBool {
+            target: result.clone(),
+            value,
+        });
+        if rest.len() > 1 {
+            let before = self.context.scopes.clone();
+            let outer = std::mem::take(&mut self.context.pending_temps);
+            let branch = self.capture(|c| {
+                c.chain_step(right, &rest[1..], result)?;
+                c.release_temps();
+                Ok(())
+            })?;
+            self.context.body.push(Instruction::If {
+                condition: result.clone(),
+                yes: branch,
+                no: Body::default(),
+            });
+            self.context.diverged = false;
+            self.context.pending_temps = outer;
+            self.context.scopes = before;
+        }
+        Ok(())
+    }
+}

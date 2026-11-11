@@ -1,0 +1,38 @@
+//! 基本型の既定値と、文字・文字列の構築です。
+
+/// 整数の0を返します。
+extern fn Int() -> Int {
+    effects: "read_fresh",
+    cpp_name: "convenience_0",
+    code: "Obj<std::int64_t> convenience_0([[maybe_unused]] Loc loc) { return make_obj<std::int64_t>(0); }",
+}
+/// 偽を返します。
+extern fn Bool() -> Bool {
+    effects: "read_fresh",
+    cpp_name: "convenience_1",
+    code: "Obj<bool> convenience_1([[maybe_unused]] Loc loc) { return make_obj<bool>(false); }",
+}
+/// ASCIIコード0の文字を返します。
+extern fn Char() -> Char {
+    effects: "read_fresh",
+    cpp_name: "convenience_2",
+    code: "Obj<char> convenience_2([[maybe_unused]] Loc loc) { return make_obj<char>(0); }",
+}
+/// 空文字列を返します。
+extern fn Str() -> Str {
+    effects: "read_fresh",
+    cpp_name: "convenience_3",
+    code: "Obj<std::string> convenience_3([[maybe_unused]] Loc loc) { return make_obj<std::string>(std::string{}); }",
+}
+/// 文字列から1文字を取り出します。長さが1でなければ実行時エラーです。
+extern fn Char(s: Str) -> Char {
+    effects: "checked_read_fresh",
+    cpp_name: "convenience_4",
+    code: "Obj<char> convenience_4(Obj<std::string> s, [[maybe_unused]] Loc loc) { if(s->size()!=1) fail(loc,\"Char conversion requires one ASCII character\"); return make_obj<char>((*s)[0]); }",
+}
+/// 配列の文字を順に連結して独立した文字列を作ります。
+extern fn Str(a: Vec<Char>) -> Str {
+    effects: "read_fresh",
+    cpp_name: "convenience_5",
+    code: "Obj<std::string> convenience_5(Obj<RuskVec<char>> a, [[maybe_unused]] Loc loc) { std::string text; text.reserve(a->size()); for(const auto& c:*a) text.push_back(*c); return make_obj<std::string>(std::move(text)); }",
+}

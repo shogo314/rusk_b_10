@@ -1,0 +1,168 @@
+// Conditions and value comparisons.
+extern fn __bool__(x: Int) -> Bool {
+    lower: "(*$0 != 0)",
+    effects: "read_fresh",
+    cpp_name: "bool_Int",
+    code: "inline Obj<bool> bool_Int(Obj<std::int64_t> x, Loc) { return make_obj<bool>(*x != 0); }",
+}
+
+extern fn __eq__(a: Int, b: Int) -> Bool {
+    lower: "(*$0 == *$1)",
+    effects: "read_fresh",
+    cpp_name: "eq_Int",
+    code: "inline Obj<bool> eq_Int(Obj<std::int64_t> a, Obj<std::int64_t> b, Loc) { return make_obj<bool>(*a == *b); }",
+}
+
+extern fn __ne__(a: Int, b: Int) -> Bool {
+    lower: "(*$0 != *$1)",
+    effects: "read_fresh",
+    cpp_name: "ne_Int",
+    code: "inline Obj<bool> ne_Int(Obj<std::int64_t> a, Obj<std::int64_t> b, Loc) { return make_obj<bool>(*a != *b); }",
+}
+
+extern fn __lt__(a: Int, b: Int) -> Bool {
+    lower: "(*$0 < *$1)",
+    effects: "read_fresh",
+    cpp_name: "lt_Int",
+    code: "inline Obj<bool> lt_Int(Obj<std::int64_t> a, Obj<std::int64_t> b, Loc) { return make_obj<bool>(*a < *b); }",
+}
+
+extern fn __le__(a: Int, b: Int) -> Bool {
+    lower: "(*$0 <= *$1)",
+    effects: "read_fresh",
+    cpp_name: "le_Int",
+    code: "inline Obj<bool> le_Int(Obj<std::int64_t> a, Obj<std::int64_t> b, Loc) { return make_obj<bool>(*a <= *b); }",
+}
+
+extern fn __gt__(a: Int, b: Int) -> Bool {
+    lower: "(*$0 > *$1)",
+    effects: "read_fresh",
+    cpp_name: "gt_Int",
+    code: "inline Obj<bool> gt_Int(Obj<std::int64_t> a, Obj<std::int64_t> b, Loc) { return make_obj<bool>(*a > *b); }",
+}
+
+extern fn __ge__(a: Int, b: Int) -> Bool {
+    lower: "(*$0 >= *$1)",
+    effects: "read_fresh",
+    cpp_name: "ge_Int",
+    code: "inline Obj<bool> ge_Int(Obj<std::int64_t> a, Obj<std::int64_t> b, Loc) { return make_obj<bool>(*a >= *b); }",
+}
+
+extern fn __bool__(x: Bool) -> Bool {
+    lower: "(*$0 != 0)",
+    effects: "read_fresh",
+    cpp_name: "bool_Bool",
+    code: "inline Obj<bool> bool_Bool(Obj<bool> x, Loc) { return make_obj<bool>(*x != 0); }",
+}
+
+extern fn __eq__(a: Bool, b: Bool) -> Bool {
+    lower: "(*$0 == *$1)",
+    effects: "read_fresh",
+    cpp_name: "eq_Bool",
+    code: "inline Obj<bool> eq_Bool(Obj<bool> a, Obj<bool> b, Loc) { return make_obj<bool>(*a == *b); }",
+}
+
+extern fn __ne__(a: Bool, b: Bool) -> Bool {
+    lower: "(*$0 != *$1)",
+    effects: "read_fresh",
+    cpp_name: "ne_Bool",
+    code: "inline Obj<bool> ne_Bool(Obj<bool> a, Obj<bool> b, Loc) { return make_obj<bool>(*a != *b); }",
+}
+
+extern fn __bool__(x: Char) -> Bool {
+    lower: "(*$0 != 0)",
+    effects: "read_fresh",
+    cpp_name: "bool_Char",
+    code: "inline Obj<bool> bool_Char(Obj<char> x, Loc) { return make_obj<bool>(*x != 0); }",
+}
+
+extern fn __eq__(a: Char, b: Char) -> Bool {
+    lower: "(*$0 == *$1)",
+    effects: "read_fresh",
+    cpp_name: "eq_Char",
+    code: "inline Obj<bool> eq_Char(Obj<char> a, Obj<char> b, Loc) { return make_obj<bool>(*a == *b); }",
+}
+
+extern fn __ne__(a: Char, b: Char) -> Bool {
+    lower: "(*$0 != *$1)",
+    effects: "read_fresh",
+    cpp_name: "ne_Char",
+    code: "inline Obj<bool> ne_Char(Obj<char> a, Obj<char> b, Loc) { return make_obj<bool>(*a != *b); }",
+}
+
+extern fn __lt__(a: Char, b: Char) -> Bool {
+    lower: "(*$0 < *$1)",
+    effects: "read_fresh",
+    cpp_name: "lt_Char",
+    code: "inline Obj<bool> lt_Char(Obj<char> a, Obj<char> b, Loc) { return make_obj<bool>(*a < *b); }",
+}
+
+extern fn __le__(a: Char, b: Char) -> Bool {
+    lower: "(*$0 <= *$1)",
+    effects: "read_fresh",
+    cpp_name: "le_Char",
+    code: "inline Obj<bool> le_Char(Obj<char> a, Obj<char> b, Loc) { return make_obj<bool>(*a <= *b); }",
+}
+
+extern fn __gt__(a: Char, b: Char) -> Bool {
+    lower: "(*$0 > *$1)",
+    effects: "read_fresh",
+    cpp_name: "gt_Char",
+    code: "inline Obj<bool> gt_Char(Obj<char> a, Obj<char> b, Loc) { return make_obj<bool>(*a > *b); }",
+}
+
+extern fn __ge__(a: Char, b: Char) -> Bool {
+    lower: "(*$0 >= *$1)",
+    effects: "read_fresh",
+    cpp_name: "ge_Char",
+    code: "inline Obj<bool> ge_Char(Obj<char> a, Obj<char> b, Loc) { return make_obj<bool>(*a >= *b); }",
+}
+
+extern fn __bool__(x: Str) -> Bool {
+    lower: "!$0->empty()",
+    effects: "read_fresh",
+    cpp_name: "bool_Str",
+    code: "inline Obj<bool> bool_Str(Obj<std::string> x, Loc) { return make_obj<bool>(!x->empty()); }",
+}
+
+extern fn __eq__(a: Str, b: Str) -> Bool {
+    lower: "(*$0 == *$1)",
+    effects: "read_fresh",
+    cpp_name: "eq_Str",
+    code: "inline Obj<bool> eq_Str(Obj<std::string> a, Obj<std::string> b, Loc) { return make_obj<bool>(*a == *b); }",
+}
+
+extern fn __ne__(a: Str, b: Str) -> Bool {
+    lower: "(*$0 != *$1)",
+    effects: "read_fresh",
+    cpp_name: "ne_Str",
+    code: "inline Obj<bool> ne_Str(Obj<std::string> a, Obj<std::string> b, Loc) { return make_obj<bool>(*a != *b); }",
+}
+
+extern fn __lt__(a: Str, b: Str) -> Bool {
+    lower: "(*$0 < *$1)",
+    effects: "read_fresh",
+    cpp_name: "lt_Str",
+    code: "inline Obj<bool> lt_Str(Obj<std::string> a, Obj<std::string> b, Loc) { return make_obj<bool>(*a < *b); }",
+}
+
+extern fn __le__(a: Str, b: Str) -> Bool {
+    lower: "(*$0 <= *$1)",
+    effects: "read_fresh",
+    cpp_name: "le_Str",
+    code: "inline Obj<bool> le_Str(Obj<std::string> a, Obj<std::string> b, Loc) { return make_obj<bool>(*a <= *b); }",
+}
+
+extern fn __gt__(a: Str, b: Str) -> Bool {
+    lower: "(*$0 > *$1)",
+    effects: "read_fresh",
+    cpp_name: "gt_Str",
+    code: "inline Obj<bool> gt_Str(Obj<std::string> a, Obj<std::string> b, Loc) { return make_obj<bool>(*a > *b); }",
+}
+
+extern fn __ge__(a: Str, b: Str) -> Bool {
+    lower: "(*$0 >= *$1)",
+    effects: "read_fresh",
+    cpp_name: "ge_Str",
+    code: "inline Obj<bool> ge_Str(Obj<std::string> a, Obj<std::string> b, Loc) { return make_obj<bool>(*a >= *b); }",
+}

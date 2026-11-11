@@ -1,0 +1,31 @@
+struct Ranked {
+    rank: Int;
+    name: Str;
+}
+
+fn __cmp__(a: Ranked, b: Ranked) -> Ordering {
+    return a.rank <=> b.rank;
+}
+
+let a := Ranked {
+    rank: 3,
+    name: "a"
+};
+let b := Ranked {
+    rank: 1,
+    name: "b"
+};
+let c := Ranked {
+    rank: 3,
+    name: "c"
+};
+wt is_greater(a <=> b), b < a, a <= c;
+let values := [a, b, c];
+sort(values);
+wt values[0].name, values[1].name, values[2].name;
+
+let positive_nan := Float("nan");
+let floats := [positive_nan, 0.0, -0.0, -positive_nan, Float("inf"), Float("-inf")];
+sort_by_comp(floats, total_less);
+wt floats;
+wt partial_cmp(positive_nan, 1.0).is_none(), is_less(total_cmp(-0.0, 0.0));

@@ -1,0 +1,8 @@
+include "runtime/prelude.rusk";
+include "core/prelude.rusk";
+include "collections/prelude.rusk";
+include "collections/vec.rusk";
+include "collections/hash.rusk";
+include "iter/lazy.rusk";
+include "iter/adapters.rusk";
+include "algorithms/prelude.rusk";

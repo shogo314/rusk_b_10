@@ -1,0 +1,57 @@
+//! ASCII文字列の長さ、連結、検索などの操作です。
+
+/// ASCII文字の個数を返します。
+extern fn len(s: Str) -> Int {
+    lower: "checked_int(static_cast<__int128>($0->size()), $loc)",
+    effects: "checked_read_fresh",
+    cpp_name: "basic_function_24",
+    code: "Obj<std::int64_t> basic_function_24(Obj<std::string> s, [[maybe_unused]] Loc loc) { return make_obj<std::int64_t>(checked_int(static_cast<__int128>(s->size()),loc)); }",
+}
+extern fn __getitem__(s: Str, i: Int) -> Char {
+    effects: "element",
+    cpp_name: "basic_function_25",
+    code: "Obj<char> basic_function_25(Obj<std::string> s, Obj<std::int64_t> i, [[maybe_unused]] Loc loc) { return string_get(s,*i,loc); }",
+}
+extern fn __add__(a: Str, b: Str) -> Str {
+    effects: "read_fresh",
+    cpp_name: "basic_function_26",
+    code: "Obj<std::string> basic_function_26(Obj<std::string> a, Obj<std::string> b, [[maybe_unused]] Loc loc) { return make_obj<std::string>(*a+*b); }",
+}
+extern fn __iadd__(a: Str, b: Str) {
+    effects: "checked_resize_first",
+    cpp_name: "basic_function_27",
+    code: "void basic_function_27(Obj<std::string> a, Obj<std::string> b, [[maybe_unused]] Loc loc) { if(!b->empty()) { check_string_resize(a,loc); *a+=*b; } }",
+}
+/// 文字の値を文字列の末尾に追加します。文字を共有中の長さ変更は実行時エラーです。
+extern fn push_back(s: Str, c: Char) {
+    effects: "checked_resize_first",
+    cpp_name: "basic_function_28",
+    code: "void basic_function_28(Obj<std::string> s, Obj<char> c, [[maybe_unused]] Loc loc) { char value=*c; check_string_resize(s,loc); s->push_back(value); }",
+}
+/// 部分文字列が含まれるか調べます。
+extern fn contains(s: Str, needle: Str) -> Bool {
+    effects: "read_fresh",
+    cpp_name: "basic_function_29",
+    code: "Obj<bool> basic_function_29(Obj<std::string> s, Obj<std::string> needle, [[maybe_unused]] Loc loc) { return make_obj<bool>(s->find(*needle)!=std::string::npos); }",
+}
+/// 指定の文字が含まれるか調べます。
+extern fn contains(s: Str, needle: Char) -> Bool {
+    effects: "read_fresh",
+    cpp_name: "basic_function_30",
+    code: "Obj<bool> basic_function_30(Obj<std::string> s, Obj<char> needle, [[maybe_unused]] Loc loc) { return make_obj<bool>(s->find(*needle)!=std::string::npos); }",
+}
+extern fn __add__(c: Char, n: Int) -> Char {
+    effects: "checked_read_fresh",
+    cpp_name: "basic_function_31",
+    code: "Obj<char> basic_function_31(Obj<char> c, Obj<std::int64_t> n, [[maybe_unused]] Loc loc) { return make_obj<char>(checked_char(static_cast<__int128>(*c)+*n,loc)); }",
+}
+extern fn __sub__(c: Char, n: Int) -> Char {
+    effects: "checked_read_fresh",
+    cpp_name: "basic_function_32",
+    code: "Obj<char> basic_function_32(Obj<char> c, Obj<std::int64_t> n, [[maybe_unused]] Loc loc) { return make_obj<char>(checked_char(static_cast<__int128>(*c)-*n,loc)); }",
+}
+extern fn __sub__(a: Char, b: Char) -> Int {
+    effects: "checked_read_fresh",
+    cpp_name: "basic_function_33",
+    code: "Obj<std::int64_t> basic_function_33(Obj<char> a, Obj<char> b, [[maybe_unused]] Loc loc) { return make_obj<std::int64_t>(static_cast<std::int64_t>(*a)-*b); }",
+}

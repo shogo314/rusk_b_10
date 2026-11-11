@@ -1,0 +1,24 @@
+let data := [2, 4, 6];
+for (i, value) in data.enumerate(1) {
+    value += i;
+}
+wt data;
+
+let pairs := zip(data.reversed(), 10 .. 13);
+let snapshot = pairs;
+for pair in pairs {
+    wt pair;
+    break;
+}
+wt pairs.to_vec(), snapshot.to_vec();
+
+let letters := "abc";
+{
+    let cursor := letters.reversed();
+    for letter in cursor {
+        letter = 'X';
+        break;
+    }
+}
+letters.push_back('!');
+wt letters, (3 .. 6).reversed().to_vec();

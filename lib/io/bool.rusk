@@ -1,0 +1,5 @@
+extern fn __read__() -> Bool {
+    effects: "io_read_fresh",
+    cpp_name: "basic_function_23",
+    code: "Obj<bool> basic_function_23([[maybe_unused]] Loc loc) { return read_value<bool>(loc); }",
+}

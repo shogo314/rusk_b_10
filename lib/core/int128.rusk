@@ -1,0 +1,249 @@
+//! 128ビットの符号付き整数と検査付き演算です。
+
+/// −2¹²⁷から2¹²⁷−1までの符号付き128ビット整数です。
+extern type Int128 {
+    cpp_name: "RuskI128",
+    representation: "i128",
+}
+
+/// 整数の0を返します。
+extern fn Int128() -> Int128 {
+    lower: "RuskI128{0}",
+    effects: "read_fresh",
+    cpp_name: "rusk_native_i128_zero",
+    code: "inline Obj<RuskI128> rusk_native_i128_zero(Loc) { return make_obj<RuskI128>(RuskI128{0}); }",
+}
+
+/// 128ビット整数をコピーします。
+extern fn Int128(x: Int128) -> Int128 {
+    lower: "*$0",
+    effects: "read_fresh",
+    cpp_name: "rusk_native_i128_copy_ctor",
+    code: "inline Obj<RuskI128> rusk_native_i128_copy_ctor(Obj<RuskI128> x, Loc) { return make_obj<RuskI128>(*x); }",
+}
+
+/// Intの値を保ったままInt128へ変換します。
+extern fn Int128(x: Int) -> Int128 {
+    lower: "static_cast<RuskI128>(*$0)",
+    effects: "read_fresh",
+    cpp_name: "rusk_native_i128_from_int",
+    code: "inline Obj<RuskI128> rusk_native_i128_from_int(Obj<std::int64_t> x, Loc) { return make_obj<RuskI128>(static_cast<RuskI128>(*x)); }",
+}
+
+/// 偽を0、真を1に変換します。
+extern fn Int128(x: Bool) -> Int128 {
+    lower: "static_cast<RuskI128>(*$0)",
+    effects: "read_fresh",
+    cpp_name: "rusk_native_i128_from_bool",
+    code: "inline Obj<RuskI128> rusk_native_i128_from_bool(Obj<bool> x, Loc) { return make_obj<RuskI128>(static_cast<RuskI128>(*x)); }",
+}
+
+/// 符号付き十進表記を読み取ります。不正な入力や範囲外は実行時エラーです。
+extern fn Int128(text: Str) -> Int128 {
+    lower: "rusk_parse_i128(*$0, $loc)",
+    effects: "checked_read_fresh",
+    cpp_name: "rusk_native_i128_from_str",
+    code: "inline Obj<RuskI128> rusk_native_i128_from_str(Obj<std::string> text, Loc loc) { return make_obj<RuskI128>(rusk_parse_i128(*text, loc)); }",
+}
+
+/// ゼロ方向に丸めてInt128へ変換します。NaN・無限大・範囲外は実行時エラーです。
+extern fn Int128(x: Float) -> Int128 {
+    lower: "rusk_float_to_i128(*$0, $loc)",
+    effects: "checked_read_fresh",
+    cpp_name: "rusk_native_i128_from_float",
+    code: "inline Obj<RuskI128> rusk_native_i128_from_float(Obj<double> x, Loc loc) { return make_obj<RuskI128>(rusk_float_to_i128(*x, loc)); }",
+}
+
+/// Intへ変換します。範囲外は実行時エラーです。
+extern fn Int(x: Int128) -> Int {
+    lower: "checked_int(*$0, $loc)",
+    effects: "checked_read_fresh",
+    cpp_name: "rusk_native_i128_to_int",
+    code: "inline Obj<std::int64_t> rusk_native_i128_to_int(Obj<RuskI128> x, Loc loc) { return make_obj<std::int64_t>(checked_int(*x, loc)); }",
+}
+
+/// 128ビット整数をFloatの精度へ丸めます。
+extern fn Float(x: Int128) -> Float {
+    lower: "static_cast<double>(*$0)",
+    effects: "read_fresh",
+    cpp_name: "rusk_native_i128_to_float",
+    code: "inline Obj<double> rusk_native_i128_to_float(Obj<RuskI128> x, Loc) { return make_obj<double>(static_cast<double>(*x)); }",
+}
+
+/// 値が0以外なら真を返します。
+extern fn Bool(x: Int128) -> Bool {
+    lower: "*$0 != 0",
+    effects: "read_fresh",
+    cpp_name: "rusk_native_i128_to_bool",
+    code: "inline Obj<bool> rusk_native_i128_to_bool(Obj<RuskI128> x, Loc) { return make_obj<bool>(*x != 0); }",
+}
+
+/// 整数を十進表記の文字列に変換します。
+extern fn Str(x: Int128) -> Str {
+    effects: "read_fresh",
+    cpp_name: "rusk_native_i128_to_str",
+    code: "inline Obj<std::string> rusk_native_i128_to_str(Obj<RuskI128> x, Loc) { return make_obj<std::string>(rusk_i128_text(*x)); }",
+}
+
+/// 同じ128ビット整数を持つ独立した値を作ります。
+extern fn copy(x: Int128) -> Int128 {
+    lower: "*$0",
+    effects: "read_fresh",
+    cpp_name: "rusk_native_i128_copy",
+    code: "inline Obj<RuskI128> rusk_native_i128_copy(Obj<RuskI128> x, Loc) { return make_obj<RuskI128>(*x); }",
+}
+
+extern fn __assign__(x: Int128, value: Int128) {
+    lower: "*$0 = *$1",
+    operation: "assign",
+    effects: "write_first",
+    cpp_name: "rusk_native_i128_assign",
+    code: "inline void rusk_native_i128_assign(Obj<RuskI128> x, Obj<RuskI128> value, Loc) { *x = *value; }",
+}
+
+extern fn __add__(a: Int128, b: Int128) -> Int128 {
+    lower: "rusk_add_i128(*$0, *$1, $loc)",
+    effects: "checked_read_fresh",
+    cpp_name: "rusk_native_i128_add",
+    code: "inline Obj<RuskI128> rusk_native_i128_add(Obj<RuskI128> a, Obj<RuskI128> b, Loc loc) { return make_obj<RuskI128>(rusk_add_i128(*a, *b, loc)); }",
+}
+
+extern fn __sub__(a: Int128, b: Int128) -> Int128 {
+    lower: "rusk_sub_i128(*$0, *$1, $loc)",
+    effects: "checked_read_fresh",
+    cpp_name: "rusk_native_i128_sub",
+    code: "inline Obj<RuskI128> rusk_native_i128_sub(Obj<RuskI128> a, Obj<RuskI128> b, Loc loc) { return make_obj<RuskI128>(rusk_sub_i128(*a, *b, loc)); }",
+}
+
+extern fn __mul__(a: Int128, b: Int128) -> Int128 {
+    lower: "rusk_mul_i128(*$0, *$1, $loc)",
+    effects: "checked_read_fresh",
+    cpp_name: "rusk_native_i128_mul",
+    code: "inline Obj<RuskI128> rusk_native_i128_mul(Obj<RuskI128> a, Obj<RuskI128> b, Loc loc) { return make_obj<RuskI128>(rusk_mul_i128(*a, *b, loc)); }",
+}
+
+extern fn __div__(a: Int128, b: Int128) -> Int128 {
+    lower: "rusk_div_i128(*$0, *$1, $loc)",
+    effects: "checked_read_fresh",
+    cpp_name: "rusk_native_i128_div",
+    code: "inline Obj<RuskI128> rusk_native_i128_div(Obj<RuskI128> a, Obj<RuskI128> b, Loc loc) { return make_obj<RuskI128>(rusk_div_i128(*a, *b, loc)); }",
+}
+
+extern fn __mod__(a: Int128, b: Int128) -> Int128 {
+    lower: "rusk_mod_i128(*$0, *$1, $loc)",
+    effects: "checked_read_fresh",
+    cpp_name: "rusk_native_i128_mod",
+    code: "inline Obj<RuskI128> rusk_native_i128_mod(Obj<RuskI128> a, Obj<RuskI128> b, Loc loc) { return make_obj<RuskI128>(rusk_mod_i128(*a, *b, loc)); }",
+}
+
+extern fn __neg__(x: Int128) -> Int128 {
+    lower: "rusk_sub_i128(0, *$0, $loc)",
+    effects: "checked_read_fresh",
+    cpp_name: "rusk_native_i128_neg",
+    code: "inline Obj<RuskI128> rusk_native_i128_neg(Obj<RuskI128> x, Loc loc) { return make_obj<RuskI128>(rusk_sub_i128(0, *x, loc)); }",
+}
+
+extern fn __pos__(x: Int128) -> Int128 {
+    lower: "*$0",
+    effects: "read_fresh",
+    cpp_name: "rusk_native_i128_pos",
+    code: "inline Obj<RuskI128> rusk_native_i128_pos(Obj<RuskI128> x, Loc) { return make_obj<RuskI128>(*x); }",
+}
+
+extern fn __eq__(a: Int128, b: Int128) -> Bool {
+    lower: "*$0 == *$1",
+    effects: "read_fresh",
+    cpp_name: "rusk_native_i128_eq",
+    code: "inline Obj<bool> rusk_native_i128_eq(Obj<RuskI128> a, Obj<RuskI128> b, Loc) { return make_obj<bool>(*a == *b); }",
+}
+
+extern fn __ne__(a: Int128, b: Int128) -> Bool {
+    lower: "*$0 != *$1",
+    effects: "read_fresh",
+    cpp_name: "rusk_native_i128_ne",
+    code: "inline Obj<bool> rusk_native_i128_ne(Obj<RuskI128> a, Obj<RuskI128> b, Loc) { return make_obj<bool>(*a != *b); }",
+}
+
+extern fn __lt__(a: Int128, b: Int128) -> Bool {
+    lower: "*$0 < *$1",
+    effects: "read_fresh",
+    cpp_name: "rusk_native_i128_lt",
+    code: "inline Obj<bool> rusk_native_i128_lt(Obj<RuskI128> a, Obj<RuskI128> b, Loc) { return make_obj<bool>(*a < *b); }",
+}
+
+extern fn __le__(a: Int128, b: Int128) -> Bool {
+    lower: "*$0 <= *$1",
+    effects: "read_fresh",
+    cpp_name: "rusk_native_i128_le",
+    code: "inline Obj<bool> rusk_native_i128_le(Obj<RuskI128> a, Obj<RuskI128> b, Loc) { return make_obj<bool>(*a <= *b); }",
+}
+
+extern fn __gt__(a: Int128, b: Int128) -> Bool {
+    lower: "*$0 > *$1",
+    effects: "read_fresh",
+    cpp_name: "rusk_native_i128_gt",
+    code: "inline Obj<bool> rusk_native_i128_gt(Obj<RuskI128> a, Obj<RuskI128> b, Loc) { return make_obj<bool>(*a > *b); }",
+}
+
+extern fn __ge__(a: Int128, b: Int128) -> Bool {
+    lower: "*$0 >= *$1",
+    effects: "read_fresh",
+    cpp_name: "rusk_native_i128_ge",
+    code: "inline Obj<bool> rusk_native_i128_ge(Obj<RuskI128> a, Obj<RuskI128> b, Loc) { return make_obj<bool>(*a >= *b); }",
+}
+
+extern fn __bitand__(a: Int128, b: Int128) -> Int128 {
+    lower: "*$0 & *$1",
+    effects: "read_fresh",
+    cpp_name: "rusk_native_i128_bitand",
+    code: "inline Obj<RuskI128> rusk_native_i128_bitand(Obj<RuskI128> a, Obj<RuskI128> b, Loc) { return make_obj<RuskI128>(*a & *b); }",
+}
+
+extern fn __bitor__(a: Int128, b: Int128) -> Int128 {
+    lower: "*$0 | *$1",
+    effects: "read_fresh",
+    cpp_name: "rusk_native_i128_bitor",
+    code: "inline Obj<RuskI128> rusk_native_i128_bitor(Obj<RuskI128> a, Obj<RuskI128> b, Loc) { return make_obj<RuskI128>(*a | *b); }",
+}
+
+extern fn __bitxor__(a: Int128, b: Int128) -> Int128 {
+    lower: "*$0 ^ *$1",
+    effects: "read_fresh",
+    cpp_name: "rusk_native_i128_bitxor",
+    code: "inline Obj<RuskI128> rusk_native_i128_bitxor(Obj<RuskI128> a, Obj<RuskI128> b, Loc) { return make_obj<RuskI128>(*a ^ *b); }",
+}
+
+extern fn __bool__(x: Int128) -> Bool {
+    lower: "*$0 != 0",
+    effects: "read_fresh",
+    cpp_name: "rusk_native_i128_bool",
+    code: "inline Obj<bool> rusk_native_i128_bool(Obj<RuskI128> x, Loc) { return make_obj<bool>(*x != 0); }",
+}
+
+extern fn __not__(x: Int128) -> Bool {
+    lower: "*$0 == 0",
+    effects: "read_fresh",
+    cpp_name: "rusk_native_i128_not",
+    code: "inline Obj<bool> rusk_native_i128_not(Obj<RuskI128> x, Loc) { return make_obj<bool>(*x == 0); }",
+}
+
+extern fn __read__() -> Int128 {
+    effects: "io_read_fresh",
+    cpp_name: "rusk_native_i128_read",
+    code: "inline Obj<RuskI128> rusk_native_i128_read(Loc loc) { return make_obj<RuskI128>(rusk_parse_i128(read_token(loc), loc)); }",
+}
+
+extern fn __write__(x: Int128) {
+    effects: "io_write",
+    cpp_name: "rusk_native_i128_write",
+    code: "inline void rusk_native_i128_write(Obj<RuskI128> x, Loc) { rusk_write(rusk_i128_text(*x)); }",
+}
+
+/// 絶対値を返します。最小の `Int128` の絶対値は表現できないため実行時エラーです。
+fn abs(x: Int128) -> Int128 {
+    return if x < 0i128 {
+        -x
+    } else {
+        copy(x)
+    };
+}

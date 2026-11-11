@@ -1,0 +1,92 @@
+//! 整数・真偽値・文字・文字列の明示的な変換です。
+
+/// 整数をコピーします。
+extern fn Int(x: Int) -> Int {
+    effects: "read_fresh",
+    cpp_name: "basic_function_8",
+    code: "Obj<std::int64_t> basic_function_8(Obj<std::int64_t> x, [[maybe_unused]] Loc loc) { return make_obj<std::int64_t>(*x); }",
+}
+/// 整数が0以外なら真を返します。
+extern fn Bool(x: Int) -> Bool {
+    effects: "read_fresh",
+    cpp_name: "basic_function_9",
+    code: "Obj<bool> basic_function_9(Obj<std::int64_t> x, [[maybe_unused]] Loc loc) { return make_obj<bool>(*x!=0); }",
+}
+/// ASCIIコードを文字に変換します。0〜127以外は実行時エラーです。
+extern fn Char(x: Int) -> Char {
+    effects: "checked_read_fresh",
+    cpp_name: "basic_function_10",
+    code: "Obj<char> basic_function_10(Obj<std::int64_t> x, [[maybe_unused]] Loc loc) { return make_obj<char>(checked_char(*x,loc)); }",
+}
+/// 整数を10進表記の文字列に変換します。
+extern fn Str(x: Int) -> Str {
+    effects: "read_fresh",
+    cpp_name: "basic_function_11",
+    code: "Obj<std::string> basic_function_11(Obj<std::int64_t> x, [[maybe_unused]] Loc loc) { return make_obj<std::string>(std::to_string(*x)); }",
+}
+/// 偽を0、真を1に変換します。
+extern fn Int(x: Bool) -> Int {
+    effects: "read_fresh",
+    cpp_name: "basic_function_12",
+    code: "Obj<std::int64_t> basic_function_12(Obj<bool> x, [[maybe_unused]] Loc loc) { return make_obj<std::int64_t>(*x); }",
+}
+/// 真偽値をコピーします。
+extern fn Bool(x: Bool) -> Bool {
+    effects: "read_fresh",
+    cpp_name: "basic_function_13",
+    code: "Obj<bool> basic_function_13(Obj<bool> x, [[maybe_unused]] Loc loc) { return make_obj<bool>(*x!=0); }",
+}
+/// 偽をASCIIコード0の文字、真をASCIIコード1の文字に変換します。
+extern fn Char(x: Bool) -> Char {
+    effects: "checked_read_fresh",
+    cpp_name: "basic_function_14",
+    code: "Obj<char> basic_function_14(Obj<bool> x, [[maybe_unused]] Loc loc) { return make_obj<char>(checked_char(*x,loc)); }",
+}
+/// 真を `"Yes"`、偽を `"No"` に変換します。
+extern fn Str(x: Bool) -> Str {
+    effects: "read_fresh",
+    cpp_name: "basic_function_15",
+    code: "Obj<std::string> basic_function_15(Obj<bool> x, [[maybe_unused]] Loc loc) { return make_obj<std::string>((*x ? \"Yes\" : \"No\")); }",
+}
+/// 文字のASCIIコードを整数として返します。
+extern fn Int(x: Char) -> Int {
+    effects: "read_fresh",
+    cpp_name: "basic_function_16",
+    code: "Obj<std::int64_t> basic_function_16(Obj<char> x, [[maybe_unused]] Loc loc) { return make_obj<std::int64_t>(*x); }",
+}
+/// 文字のASCIIコードが0以外なら真を返します。
+extern fn Bool(x: Char) -> Bool {
+    effects: "read_fresh",
+    cpp_name: "basic_function_17",
+    code: "Obj<bool> basic_function_17(Obj<char> x, [[maybe_unused]] Loc loc) { return make_obj<bool>(*x!=0); }",
+}
+/// 文字のASCIIコードを検査してコピーします。
+extern fn Char(x: Char) -> Char {
+    effects: "checked_read_fresh",
+    cpp_name: "basic_function_18",
+    code: "Obj<char> basic_function_18(Obj<char> x, [[maybe_unused]] Loc loc) { return make_obj<char>(checked_char(*x,loc)); }",
+}
+/// 文字を含む長さ1の文字列を作ります。
+extern fn Str(x: Char) -> Str {
+    effects: "read_fresh",
+    cpp_name: "basic_function_19",
+    code: "Obj<std::string> basic_function_19(Obj<char> x, [[maybe_unused]] Loc loc) { return make_obj<std::string>(std::string(1,*x)); }",
+}
+/// 文字列をコピーします。
+extern fn Str(x: Str) -> Str {
+    effects: "read_fresh",
+    cpp_name: "basic_function_20",
+    code: "Obj<std::string> basic_function_20(Obj<std::string> x, [[maybe_unused]] Loc loc) { return make_obj<std::string>(*x); }",
+}
+/// 文字列が空でなければ真を返します。
+extern fn Bool(x: Str) -> Bool {
+    effects: "read_fresh",
+    cpp_name: "basic_function_21",
+    code: "Obj<bool> basic_function_21(Obj<std::string> x, [[maybe_unused]] Loc loc) { return make_obj<bool>(!x->empty()); }",
+}
+/// 符号付き10進表記の文字列を整数に変換します。空白や範囲外の値は実行時エラーです。
+extern fn Int(x: Str) -> Int {
+    effects: "checked_read_fresh",
+    cpp_name: "basic_function_22",
+    code: "Obj<std::int64_t> basic_function_22(Obj<std::string> x, [[maybe_unused]] Loc loc) { const auto& s=*x; const char* first=s.data(); const char* last=first+s.size(); if(first!=last && *first=='+') { ++first; if(first==last||*first<'0'||*first>'9') fail(loc,\"invalid integer conversion\"); } std::int64_t n=0; auto result=std::from_chars(first,last,n); if(result.ec!=std::errc{}||result.ptr!=last) fail(loc,\"invalid or out of range integer conversion\"); return make_obj<std::int64_t>(n); }",
+}

@@ -1,0 +1,13 @@
+fn next(readonly noescape value: Int128) -> Int128 {
+    return value + 1i128;
+}
+
+let low: Int128 := -170141183460469231731687303715884105728;
+let high := 170141183460469231731687303715884105727i128;
+let independent = high;
+let shared := independent;
+independent -= 1;
+wt low, high, shared, next(independent);
+wt -7i128 / 3i128, -7i128 % 3i128, 7i128 / -3i128, 7i128 % -3i128;
+wt low % -1i128, (high & 7i128), (1i128 | 2i128), (7i128 ^ 3i128);
+wt Int128(Str(low)) == low, Int(Int128(-42)), Int128(-3.9), Bool(high);

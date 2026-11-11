@@ -1,0 +1,9 @@
+//! 配列と整列の要素比較に使う宣言です。
+
+// Sequences retain Bool element ordering without adding Bool scalar ordering.
+/// 左側の要素が右側より小さいか判定します。真偽値は偽、真の順で、それ以外の型では `<` を使います。
+extern fn sequence_element_less<T>(a: T, b: T) -> Bool {
+    effects: "read_fresh",
+    lower: "@{if_type T matches Bool}(!*$0&&*$1)@{else}@{value_call __lt__(T,T)->Bool}($0,$1,$loc)@{end}",
+    code: "Obj<bool> @{fn}(Obj<@{T}> a,Obj<@{T}> b,Loc loc){return make_obj<bool>(@{if_type T matches Bool}(!*a&&*b)@{else}@{value_call __lt__(T,T)->Bool}(a,b,loc)@{end});}",
+}

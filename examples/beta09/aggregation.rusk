@@ -1,0 +1,14 @@
+let values := [3, 1, 1, 2];
+wt sum(values), sum(1 .. 5, 10), sum([0.5, 1.25]);
+wt min(values)?!, max(values)?!, argmin(values)?!, argmax(values)?!;
+
+let first_min := min(values)?!;
+first_min = 9;
+wt values;
+
+let initial := 4;
+let empty: Vec<Int> := [];
+let total := sum(empty, initial);
+total = 8;
+wt initial, min(empty).is_none(), argmax(empty).is_none();
+wt min_by_comp([0.0, -0.0], total_less)?!, argmax_by_comp([-0.0, 0.0], total_less)?!;

@@ -1,0 +1,67 @@
+//! `Option` の構築、判定、値の取得、入力です。
+
+// Standard Option operations use the ordinary enum and generic function paths.
+/// 共有値を含む `Some` を作ります。
+extern fn Some<T>(value: T) -> Option<T> {
+    effects: "variant_constructor:0",
+    code: "Obj<@{Option<T>}> @{fn}(Obj<@{T}> value,Loc){return rusk_enum_make<@{Option<T>},0>(value);}",
+}
+/// 値がないことを表す `None` を作ります。文脈で型が決まる場合は `None` と書けます。
+extern fn None<T>() -> Option<T> {
+    implicit_call: "true",
+    effects: "variant_constructor:1",
+    code: "Obj<@{Option<T>}> @{fn}(Loc){return rusk_enum_make<@{Option<T>},1>();}",
+}
+/// 値がない `Option` を作ります。
+extern fn Option<T>() -> Option<T> {
+    effects: "variant_constructor:1",
+    code: "Obj<@{Option<T>}> @{fn}(Loc){return rusk_enum_make<@{Option<T>},1>();}",
+}
+/// 値があれば真を返します。
+extern fn is_some<T>(x: Option<T>) -> Bool {
+    effects: "read_fresh",
+    lower: "rusk_enum_index<@{Option<T>}>($0->value)==0",
+    code: "Obj<@{Bool}> @{fn}(Obj<@{Option<T>}> x,Loc){return make_obj<@{Bool}>(rusk_enum_index<@{Option<T>}>(x->value)==0);}",
+}
+/// 値がなければ真を返します。
+extern fn is_none<T>(x: Option<T>) -> Bool {
+    effects: "read_fresh",
+    lower: "rusk_enum_index<@{Option<T>}>($0->value)!=0",
+    code: "Obj<@{Bool}> @{fn}(Obj<@{Option<T>}> x,Loc){return make_obj<@{Bool}>(rusk_enum_index<@{Option<T>}>(x->value)!=0);}",
+}
+extern fn __bool__<T>(x: Option<T>) -> Bool {
+    effects: "read_fresh",
+    lower: "rusk_enum_index<@{Option<T>}>($0->value)==0",
+    code: "Obj<@{Bool}> @{fn}(Obj<@{Option<T>}> x,Loc){return make_obj<@{Bool}>(rusk_enum_index<@{Option<T>}>(x->value)==0);}",
+}
+extern fn __not__<T>(x: Option<T>) -> Bool {
+    effects: "read_fresh",
+    lower: "rusk_enum_index<@{Option<T>}>($0->value)!=0",
+    code: "Obj<@{Bool}> @{fn}(Obj<@{Option<T>}> x,Loc){return make_obj<@{Bool}>(rusk_enum_index<@{Option<T>}>(x->value)!=0);}",
+}
+/// 格納されている値を共有して返します。値がなければ実行時エラーです。
+extern fn value<T>(x: Option<T>) -> T {
+    return_abi: "object",
+    effects: "checked_variant_field:0:0",
+    code: "Obj<@{T}> @{fn}(Obj<@{Option<T>}> x,Loc loc){if(rusk_enum_index<@{Option<T>}>(x->value)!=0)fail(loc,\"absent Option value\");return rusk_enum_payload<@{Option<T>},0>(x->value).field_0;}",
+}
+/// 次の値を読み取ります。先頭の空白を読み飛ばした後に入力が尽きていれば `None` を返します。不正な入力は実行時エラーです。
+extern fn try_read<T>() -> Option<T> {
+    effects: "io_read_fresh",
+    code: "Obj<@{Option<T>}> @{fn}(Loc loc){while(ascii_space(rusk_peek()))rusk_get();if(rusk_peek()==std::char_traits<char>::eof())return rusk_enum_make<@{Option<T>},1>();auto value=@{boxed_call __read__()->T}(loc);return rusk_enum_make<@{Option<T>},0>(value);}",
+}
+
+// Short-circuit syntax uses ordinary operation resolution. The enum descriptors
+// preserve the guarded projection IR for the closed standard implementation.
+extern fn __coalesce_test__<T>(x: Option<T>) -> Bool {
+    operation: "enum_test:0",
+    effects: "read_fresh",
+    lower: "rusk_enum_index<@{Option<T>}>($0->value)==0",
+    code: "Obj<@{Bool}> @{fn}(Obj<@{Option<T>}> x,Loc){return make_obj<@{Bool}>(rusk_enum_index<@{Option<T>}>(x->value)==0);}",
+}
+extern fn __coalesce_value__<T>(x: Option<T>) -> T {
+    operation: "enum_field:0:0",
+    return_abi: "object",
+    effects: "checked_variant_field:0:0",
+    code: "Obj<@{T}> @{fn}(Obj<@{Option<T>}> x,Loc loc){if(rusk_enum_index<@{Option<T>}>(x->value)!=0)fail(loc,\"absent Option value\");return rusk_enum_payload<@{Option<T>},0>(x->value).field_0;}",
+}

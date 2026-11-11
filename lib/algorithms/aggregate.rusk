@@ -1,0 +1,51 @@
+//! 走査順の加算と、最小・最大の要素および位置の取得です。
+
+/// 要素型の引数なしコンストラクタから始め、左から順に加算します。
+extern fn sum<S, I, T>(source: S) -> T {
+    code: "@{return T} @{fn}(Obj<@{S}> source, Loc loc) { auto it = @{boxed_call __iter__(S)->I}(source, loc); auto initial = @{boxed_call T()->T}(loc); return @{finish T}(rusk_sum_iter(it, initial, loc, @{boxed_call __iter_has_next__(I)->Bool}, @{boxed_call __iter_next__(I)->T}, @{boxed_call __add__(T,T)->T})); }",
+}
+
+/// 初期値から始めて左から順に加算します。空なら初期値を共有して返します。
+extern fn sum<S, I, T>(source: S, initial: T) -> T {
+    code: "@{return T} @{fn}(Obj<@{S}> source, Obj<@{T}> initial, Loc loc) { auto it = @{boxed_call __iter__(S)->I}(source, loc); return @{finish T}(rusk_sum_iter(it, initial, loc, @{boxed_call __iter_has_next__(I)->Bool}, @{boxed_call __iter_next__(I)->T}, @{boxed_call __add__(T,T)->T})); }",
+}
+
+/// 要素の全順序で最小となる最初の要素を共有して返します。空ならNoneです。
+extern fn min<S, I, T>(source: S) -> Option<T> {
+    code: "Obj<@{Option<T>}> @{fn}(Obj<@{S}> source, Loc loc) { auto it = @{boxed_call __iter__(S)->I}(source, loc); auto selected = rusk_extreme<false, false>(it, loc, @{boxed_call __iter_has_next__(I)->Bool}, @{boxed_call __iter_next__(I)->T}, @{value_call __total_less__<T>(T,T)->Bool}); if (!selected.value) return rusk_enum_make<@{Option<T>},1>(); return rusk_enum_make<@{Option<T>},0>(std::move(selected.value)); }",
+}
+
+/// 要素の全順序で最大となる最初の要素を共有して返します。空ならNoneです。
+extern fn max<S, I, T>(source: S) -> Option<T> {
+    code: "Obj<@{Option<T>}> @{fn}(Obj<@{S}> source, Loc loc) { auto it = @{boxed_call __iter__(S)->I}(source, loc); auto selected = rusk_extreme<true, false>(it, loc, @{boxed_call __iter_has_next__(I)->Bool}, @{boxed_call __iter_next__(I)->T}, @{value_call __total_less__<T>(T,T)->Bool}); if (!selected.value) return rusk_enum_make<@{Option<T>},1>(); return rusk_enum_make<@{Option<T>},0>(std::move(selected.value)); }",
+}
+
+/// 要素の全順序で最小となる最初の位置を0始まりで返します。空ならNoneです。
+extern fn argmin<S, I, T>(source: S) -> Option<Int> {
+    code: "Obj<@{Option<Int>}> @{fn}(Obj<@{S}> source, Loc loc) { auto it = @{boxed_call __iter__(S)->I}(source, loc); auto selected = rusk_extreme<false, true>(it, loc, @{boxed_call __iter_has_next__(I)->Bool}, @{boxed_call __iter_next__(I)->T}, @{value_call __total_less__<T>(T,T)->Bool}); if (!selected.value) return rusk_enum_make<@{Option<Int>},1>(); selected.value.reset(); rusk_guard_iter(it, loc); return rusk_enum_make<@{Option<Int>},0>(make_obj<@{Int}>(selected.index)); }",
+}
+
+/// 要素の全順序で最大となる最初の位置を0始まりで返します。空ならNoneです。
+extern fn argmax<S, I, T>(source: S) -> Option<Int> {
+    code: "Obj<@{Option<Int>}> @{fn}(Obj<@{S}> source, Loc loc) { auto it = @{boxed_call __iter__(S)->I}(source, loc); auto selected = rusk_extreme<true, true>(it, loc, @{boxed_call __iter_has_next__(I)->Bool}, @{boxed_call __iter_next__(I)->T}, @{value_call __total_less__<T>(T,T)->Bool}); if (!selected.value) return rusk_enum_make<@{Option<Int>},1>(); selected.value.reset(); rusk_guard_iter(it, loc); return rusk_enum_make<@{Option<Int>},0>(make_obj<@{Int}>(selected.index)); }",
+}
+
+/// 比較関数で最小となる最初の要素を共有して返します。空ならNoneです。
+extern fn min_by_comp<S, I, T, F>(source: S, compare: F) -> Option<T> {
+    code: "Obj<@{Option<T>}> @{fn}(Obj<@{S}> source, Obj<@{F}> compare, Loc loc) { auto it = @{boxed_call __iter__(S)->I}(source, loc); auto less = [&](const Obj<@{T}>& a, const Obj<@{T}>& b, Loc where) { return *@{invoke F(T,T)->Bool}(compare, a, b, where); }; auto selected = rusk_extreme<false, false>(it, loc, @{boxed_call __iter_has_next__(I)->Bool}, @{boxed_call __iter_next__(I)->T}, less); if (!selected.value) return rusk_enum_make<@{Option<T>},1>(); return rusk_enum_make<@{Option<T>},0>(std::move(selected.value)); }",
+}
+
+/// 比較関数で最大となる最初の要素を共有して返します。空ならNoneです。
+extern fn max_by_comp<S, I, T, F>(source: S, compare: F) -> Option<T> {
+    code: "Obj<@{Option<T>}> @{fn}(Obj<@{S}> source, Obj<@{F}> compare, Loc loc) { auto it = @{boxed_call __iter__(S)->I}(source, loc); auto less = [&](const Obj<@{T}>& a, const Obj<@{T}>& b, Loc where) { return *@{invoke F(T,T)->Bool}(compare, a, b, where); }; auto selected = rusk_extreme<true, false>(it, loc, @{boxed_call __iter_has_next__(I)->Bool}, @{boxed_call __iter_next__(I)->T}, less); if (!selected.value) return rusk_enum_make<@{Option<T>},1>(); return rusk_enum_make<@{Option<T>},0>(std::move(selected.value)); }",
+}
+
+/// 比較関数で最小となる最初の位置を0始まりで返します。空ならNoneです。
+extern fn argmin_by_comp<S, I, T, F>(source: S, compare: F) -> Option<Int> {
+    code: "Obj<@{Option<Int>}> @{fn}(Obj<@{S}> source, Obj<@{F}> compare, Loc loc) { auto it = @{boxed_call __iter__(S)->I}(source, loc); auto less = [&](const Obj<@{T}>& a, const Obj<@{T}>& b, Loc where) { return *@{invoke F(T,T)->Bool}(compare, a, b, where); }; auto selected = rusk_extreme<false, true>(it, loc, @{boxed_call __iter_has_next__(I)->Bool}, @{boxed_call __iter_next__(I)->T}, less); if (!selected.value) return rusk_enum_make<@{Option<Int>},1>(); selected.value.reset(); rusk_guard_iter(it, loc); return rusk_enum_make<@{Option<Int>},0>(make_obj<@{Int}>(selected.index)); }",
+}
+
+/// 比較関数で最大となる最初の位置を0始まりで返します。空ならNoneです。
+extern fn argmax_by_comp<S, I, T, F>(source: S, compare: F) -> Option<Int> {
+    code: "Obj<@{Option<Int>}> @{fn}(Obj<@{S}> source, Obj<@{F}> compare, Loc loc) { auto it = @{boxed_call __iter__(S)->I}(source, loc); auto less = [&](const Obj<@{T}>& a, const Obj<@{T}>& b, Loc where) { return *@{invoke F(T,T)->Bool}(compare, a, b, where); }; auto selected = rusk_extreme<true, true>(it, loc, @{boxed_call __iter_has_next__(I)->Bool}, @{boxed_call __iter_next__(I)->T}, less); if (!selected.value) return rusk_enum_make<@{Option<Int>},1>(); selected.value.reset(); rusk_guard_iter(it, loc); return rusk_enum_make<@{Option<Int>},0>(make_obj<@{Int}>(selected.index)); }",
+}

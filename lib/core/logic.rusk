@@ -1,0 +1,24 @@
+extern fn __not__(x: Int) -> Bool {
+    lower: "!((*$0 != 0))",
+    effects: "read_fresh",
+    cpp_name: "basic_function_4",
+    code: "Obj<bool> basic_function_4(Obj<std::int64_t> x, [[maybe_unused]] Loc loc) { return make_obj<bool>(!(*x!=0)); }",
+}
+extern fn __not__(x: Bool) -> Bool {
+    lower: "!((*$0 != 0))",
+    effects: "read_fresh",
+    cpp_name: "basic_function_5",
+    code: "Obj<bool> basic_function_5(Obj<bool> x, [[maybe_unused]] Loc loc) { return make_obj<bool>(!(*x!=0)); }",
+}
+extern fn __not__(x: Char) -> Bool {
+    lower: "!((*$0 != 0))",
+    effects: "read_fresh",
+    cpp_name: "basic_function_6",
+    code: "Obj<bool> basic_function_6(Obj<char> x, [[maybe_unused]] Loc loc) { return make_obj<bool>(!(*x!=0)); }",
+}
+extern fn __not__(x: Str) -> Bool {
+    lower: "!(!$0->empty())",
+    effects: "read_fresh",
+    cpp_name: "basic_function_7",
+    code: "Obj<bool> basic_function_7(Obj<std::string> x, [[maybe_unused]] Loc loc) { return make_obj<bool>(!(!x->empty())); }",
+}

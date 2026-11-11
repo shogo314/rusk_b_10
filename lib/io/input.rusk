@@ -1,0 +1,27 @@
+//! 標準入力からASCII文字列などを読み取ります。
+
+extern fn __read__() -> Int {
+    lower: "rusk_read_int($loc)",
+    effects: "io_read_fresh",
+    cpp_name: "read_Int",
+    code: "inline Obj<std::int64_t> read_Int(Loc loc) {\n    auto token = read_token(loc);\n    const char* first = token.data(); const char* last = first + token.size();\n    if (first != last && *first == '+') { ++first; if (first == last || *first < '0' || *first > '9') fail(loc, \"invalid integer input\"); }\n    std::int64_t value = 0;\n    auto result = std::from_chars(first, last, value);\n    if (result.ec == std::errc::result_out_of_range) fail(loc, \"integer input out of range\");\n    if (result.ec != std::errc{} || result.ptr != last) fail(loc, \"invalid integer input\");\n    return make_obj<std::int64_t>(value);\n}",
+}
+
+extern fn __read__() -> Str {
+    effects: "io_read_fresh",
+    cpp_name: "read_Str",
+    code: "inline Obj<std::string> read_Str(Loc loc) {\n    auto value = read_token(loc); require_ascii(value, loc); return make_obj<std::string>(value);\n}",
+}
+
+extern fn __read__() -> Char {
+    effects: "io_read_fresh",
+    cpp_name: "read_Char",
+    code: "inline Obj<char> read_Char(Loc loc) {\n    while (ascii_space(rusk_peek())) rusk_get();\n    int c = rusk_get();\n    if (c == std::char_traits<char>::eof()) fail(loc, \"unexpected end of input\");\n    if (c > 127) fail(loc, \"non-ASCII input\");\n    return make_obj<char>(static_cast<char>(c));\n}",
+}
+
+/// 標準入力の現在位置から行末までを読み取ります。改行は結果に含まず、読み始めに入力が尽きていれば実行時エラーです。
+extern fn read_line() -> Str {
+    effects: "io_read_fresh",
+    cpp_name: "read_line_Str",
+    code: "inline Obj<std::string> read_line_Str(Loc loc) { auto value=rusk_read_line(loc); require_ascii(value,loc); return make_obj<std::string>(value); }",
+}

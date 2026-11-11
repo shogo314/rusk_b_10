@@ -1,0 +1,136 @@
+---
+search:
+  exclude: true
+---
+
+# β08の専用処理と移行依存関係
+
+<!-- rusk-docs: history -->
+
+!!! note "過去の開発記録"
+    このページの計画・件数・パス・測定値は記録当時のものです。現在の構成は[開発ガイド](index.md)、対応範囲は[言語リファレンス](../reference/status.md)を参照してください。
+
+調査基準はβ08開始コミット`3a59755`。[作業計画](beta08.md)の段階1で作成した分類と移行方針を保ち、実装で変わった箇所を更新している。各行の移行方針は完了を意味しない。実装済みの範囲と残る処理は末尾の進捗表にも記録する。
+
+現在の34項目の移行先と残す処理は[移行境界の監査](beta08-boundaries.md)を参照する。以下には開始時点の調査と、段階ごとの実装履歴を残す。
+
+## 分類と調査範囲
+
+同じ実装の各オーバーロードは一行にまとめ、呼び出し入口・型の登録・本体生成・解析・最適化を別々に追った。`src/`の型名・関数名による分岐、`include_str!`、文字列置換、C++生成を調べ、`lib/`の宣言と関連テストを対応させた。テスト用の文字列や診断表示だけの名前は移行対象に数えない。今後、新しい依存が見つかったらこの一覧を更新する。
+
+- **移行**：通常のRusk定義、extern定義、宣言に付随する共通の情報へ移す。
+- **基盤候補**：言語の意味や安全性を実装する処理として残す案。ファイル全体の例外ではない。
+- **要設計**：移せる操作と、処理系が生成すべき仕組みの境界を先に決める。
+
+依存欄の記号は、後述する共通基盤を指す。検証欄は既存の回帰テストの所在であり、未実装のジェネリックexternまで検証済みという意味ではない。テスト名は`tests/`以下のファイル名から`.rs`を省略した。
+
+## 型・名前解決と呼び出し入口
+
+| ID | 現在の処理と所在 | 分類・移行先／残す理由 | 依存 | 検証 |
+|---|---|---|---|---|
+| N01 | `compiler.rs::compile`の外部型・関数登録、`rusk.par::ExternType/ExternFn` | 移行：具体型限定の登録を外部ジェネリクスと共通化。通常の型検査は残す | G1、G2 | `generics`、`e2e`＋外部型・関数の新規例 |
+| N02 | `compiler.rs::check_type/specialize_vector`のVec型の専用登録と要素制限 | 移行済み：Vec・配列反復型と32操作を通常のジェネリックexternへ移行。型・操作の専用登録、要素型の列挙、広域置換を削除し、コピーも要素の通常の操作を解決する | G1、G2、G4 | `e2e`、`records`、`enums`、`beta06`、`library_migration`、`extern_generics` |
+| N03 | `compiler.rs::call`のenum→container→通常解決→collection→higher_orderという専用経路 | 移行中：Dict/Setの構築・主要操作も通常の候補解決へ移し、container/collectionの呼び出し経路を削除。enum構文と、遅延反復等の残る処理は別項目で扱う | G1〜G5 | `generics`、`higher_order`、`beta05`、`enums` |
+| N04 | `compiler.rs::return_selected`、`containers.rs::container_argument_hint`のread・Vec構築・Some・Dict操作に固有の型ヒント | Dict/Setのキー・値・添字の専用ヒントを削除し、宣言の引数と結果の期待型を通常の推論へ接続。残る構文のヒントは個別に確認する | G1、G2 | `generics`、`beta05`、`enums`＋期待型だけで決まるextern |
+| N05 | `compiler.rs::compile`、`enums.rs::register_enum`の標準型・構築関数の予約名 | 標準型の予約一覧を削除し、型系列の共通の重複検査へ統合。Some/None/Option/try_readの利用者関数禁止も削除し通常の候補・署名検査を使う。内部生成名とTupleの言語構築子だけを全宣言共通で保護。bare Noneの名前判定も宣言のimplicit_callへ移行（末尾の進捗を参照） | G1、G5 | `generics`、`records`、`enums`の不正宣言 |
+| N06 | `generics.rs`の型引数の照合・AST代入・具体化キャッシュ・再帰上限 | 基盤候補：任意の宣言の具体化。Rusk ASTの識別子代入はC++本体の広域置換とは別で、G1に拡張する | G1、G2 | `generics`、`enums`の型変数とvariant名の衝突 |
+| N07 | `compiler.rs::expr/statement/binary_name`、`expressions.rs`、`tuples.rs::assign_tuple_value`の演算子・配列・範囲・for・代入・短絡の展開 | 基盤候補：構文から操作を呼ぶ規約と評価順序は残す。呼び出す標準操作の実装は移行。`??`の型名・variant位置と`?!`のOption限定検査は通常の操作宣言へ分離済み。予約名とbare None等はN05で継続 | G5 | `bindings`、`tuples`、`blocks_labels`、`beta05`、`optimization` |
+| N08 | `ast.rs`のリテラル型、`compiler.rs::literal`、`patterns/coverage.rs`のBool・Int・Str等の被覆判定 | 基盤候補：リテラルとパターンの言語仕様。基本型の登録・表現情報との境界を明記する | G4、G5 | `enums`、`pipeline`、`e2e` |
+
+## ライブラリ本体と補助コード
+
+| ID | 現在の処理と所在 | 分類・移行先／残す理由 | 依存 | 検証 |
+|---|---|---|---|---|
+| L01 | `higher_order.rs::higher_order`のmap/filterと`lazy_cpp/lazy_copy_*`の遅延型・キャッシュ・コピー・変更検出 | 移行：外部ジェネリック型と関数。遅延評価とキャッシュの意味を維持 | G1〜G4 | `higher_order`、`callables`、`beta04_structures` |
+| L02 | 同関数のall/any/fold/scan/to_vec | 移行：Ruskまたはexternの通常のアルゴリズム。短絡、初期値のコピー、scanのスナップショットを維持 | G1〜G4 | `higher_order`、`beta04_structures` |
+| L03 | 同関数のfirst_true・sort_by_key・sort_by_comp | 移行：二分探索・ソート本体、比較・キー関数の呼び出し、キーの一度だけの評価をライブラリへ | G1〜G4 | `higher_order`、`beta04_structures` |
+| L04 | `higher_order.rs::iteration/callback/copy_function`の型名による要素推定、静的関数照合、コピー関数参照 | 移行：宣言から反復要素・呼び出し・コピーを解決。静的な型整合性の検査自体は共通基盤として残す | G2〜G4 | `callables`、`higher_order`＋別名の反復型 |
+| L05 | `higher_order.rs::native_function`、`containers.rs::cached_native`の生成関数登録・名前と型によるキャッシュ | 専用`cached_native`と`container_functions`を撤去し、構築・主要操作を通常のジェネリクス具体化へ統合。導出・遅延反復等の`native_function`による登録は引き続き対象とする | G1、G2 | `generics`＋同じ具体化の複数利用・宣言順序 |
+| L06 | `containers.rs::specialize_container/container_cpp`のDict/Set型・キー制限・コピーと代入の登録 | 移行済み：型・キー制限・ハッシュ／等値・コピー・代入を通常の宣言へ移し、専用登録・本体生成を削除。保持・効果の合成はG4で継続 | G1、G2、G4 | `beta05`、`enums`、`data_structures` |
+| L07 | `containers.rs::register_collection_iterator/container_guards`の所有元・変更世代・完了状態・キー出力 | 移行：Dict/Setの外部反復型・関数。キーを保護し、削除後の共有値と寿命を維持 | G1〜G4 | `beta05`、`higher_order` |
+| L08 | `containers.rs::collection_operation`のlen/empty/bool/clear/contains/erase/get/insert/set/添字/keys/values | 移行済み：26宣言と既定値構築の補助を`lib/hash_collections.rusk`へ移し、専用の操作名分岐・本体生成を削除。添字の既定値挿入・コピー順・キー保護・値の共有を維持 | G1、G2、G4 | `beta05`の共有・キー保護・参照実装との比較 |
+| L09 | `containers.rs::key_hash_cpp/key_equal_cpp/prepare_container_copies/container_copy_cpp`のキー演算・再帰コピーと宣言生成 | 移行済み：型に値返却のキー演算を渡し、基本型の分岐とTupleのフィールド展開で本体・適用条件を記述。旧ハッシュ／等値・再帰コピーの生成を削除 | G2、G4、G6 | `beta05`、`enums`の論理型ごとのcopy |
+| L10 | `containers.rs::container_constructor/default_function`のSome/None/Option/Dict/Set/try_read構築と`$fn`置換 | 構築と既定値選択を通常の宣言へ移行：Some/None/Option/try_readに続いてDict/Setも移し、`container_constructor/default_function`を削除。型・操作に残る専用登録は他項目で扱う | G1、G2、G5 | `beta05`、`enums`、`buffered_io` |
+| L11 | `containers.rs::read_function`の多次元Vec・Tupleの入力本体と`$fn`置換 | Tuple・多次元Vecの本体を標準の役割テンプレートへ移行。固定引数の列挙・末尾の型列参照を共通化し、入力本体の`$fn`置換を削除。構文からの導出要求と既存の型判定は残る | G1、G2、G6 | `beta05`、`tuples`、`buffered_io`＋不正な次元・負の長さ |
+| L12 | `enums.rs::specialize_enum/option_element/option_operation`のOption名判定・helper自動登録・is_some/is_none/bool/not/value | 操作を移行済み：構築・検査・値取得を通常の宣言へ移し、自動登録を撤去。構文に残る型・役割判定はN07/G5で整理 | G1、G2、G4、G5 | `enums`のOption互換、`beta05`、`effects` |
+| L13 | `records.rs::prepare_record/prepare_record_copies/record_copy_cpp`、`enums.rs`のcopy/assignと再帰コピー生成 | 要設計：レイアウト生成と自動操作を分離。任意のフィールド・payloadのcopy参照、順序、外側の同一性を共通の導出機構で表す案 | G4、G6 | `records`、`enums`、`heap_aliases` |
+| L14 | `tuples.rs::automatic_value/prepare_tuple_functions/tuple_cpp`の基本型限定の比較・出力の自動生成 | Tupleの出力と6比較を標準テンプレートとフィールドの操作参照へ移行。順序比較のC++演算子と旧補助を削除し、事前登録の基本型名の列挙も表現情報へ置換。キー用の物理的な等値補助もL09で宣言へ移行 | G4、G6 | `tuples`、`minmax`、`records` |
+| L15 | `records.rs::record_value/field`、`tuples.rs::specialize_tuple/tuple_value/tuple_item`、`enums.rs`のvariant構築と`patterns/` | 基盤候補：ユーザー定義の積型・和型、フィールド射影、パターン照合。L12〜L14の標準操作本体を含めて例外にしない | G5、G6 | `records`、`tuples`、`enums`、`pipeline` |
+| L16 | `callables.rs`のlambda・関数値・捕捉用構造体・invoke生成 | 基盤候補：静的関数の型と捕捉環境は言語機能。externへの参照・呼び出しはG3として共通化 | G3、G4 | `callables`、`bindings`、`noescape`、`readonly` |
+
+## 型情報・効果・最適化・生成順序
+
+| ID | 現在の処理と所在 | 分類・移行先／残す理由 | 依存 | 検証 |
+|---|---|---|---|---|
+| A01 | `ir_types.rs::ir_types`のVec/Iter/RangeIter/Dict/Set・基本型の名前による分類 | 移行：登録した型に付随する表現・要素・共有先の情報からIR型を作る。同じC++型でもRuskの型同一性を保つ | G1、G4 | `pipeline`、`effects`、`heap_aliases`＋別名型 |
+| A02 | `native_effects.rs::contract`の基本型制限・Vector要素・Option variant形状、`effects.rs::project_type`のStr→Char | 要設計：契約検証と共有先射影は残す。標準型の形状・役割との対応は宣言に接続し、不適合な宣言を拒否する | G4 | `effects`、`effect_optimization`、`enums`＋契約不整合 |
+| A03 | `compiler/effects.rs::declared_native_effects`と`compiler/cpp.rs::cpp_context`の埋め込みファイル名による信頼判定 | 移行：読込元の信頼情報を宣言・具体化へ伝える。任意の利用者externは未知として扱う | G1、G4 | `optimization`の不透明extern、`effects`＋契約詐称拒否 |
+| A04 | `effects.rs`の戻り値解析、`readonly.rs::aggregate`等のInt/Bool/Char/Unitによる非集約判定 | 移行：型の表現・共有情報に接続。解析手順と保守的な未知の扱いは残す | G4 | `effects`、`readonly`、`noescape`、`heap_aliases` |
+| A05 | `backend/intrinsics.rs::lower/lower_element`の名前と型による算術・比較・copy/assign・入出力・bool/len・反復・添字の直接生成 | 移行：宣言に対応する意味情報と共通の生成規則へ。境界検査・overflow・エラー位置・所有付き結果を保つ | G4 | `optimization`、`effect_optimization`、`buffered_io` |
+| A06 | `backend/scalar_aliases.rs`の基本型分類と`__assign__`判定、`backend/cpp.rs`の基本型の直接保持 | 移行：表現と操作の意味情報へ。安全な保持・借用を証明するアルゴリズム自体は残す | G4 | `optimization`、`effect_optimization`、`heap_aliases` |
+| A07 | `effects/`、`readonly/`、`bindings.rs`、`backend/owned_aliases*`・`storage.rs`の効果・寿命・所有元・区間解析 | 基盤候補：任意のプログラムの安全性と保持方法の証明。型の判定はA01〜A06で分離 | G4 | `bindings`、`readonly_routes`、`noescape_routes`、`effect_optimization` |
+| A08 | `hir_validate.rs`・`lir.rs`のリテラル/Bool条件/Unit返却の整合性、`hir_flow.rs`・`lir_cleanup.rs`の制御と解放 | 基盤候補：IRの意味と整合性。基本型名の出現すべてをライブラリ本体として削除しない | G5 | `pipeline`、`blocks_labels`、各モジュールの単体テスト |
+| A09 | `compiler/cpp.rs::cpp_context`の型の前方宣言→本体→コピー定義、`backend/program.rs`の宣言・署名・ABI | 要設計：依存順序・重複抑止とABIは残す。container/lazy固有の連結順序を共通化 | G1〜G3、G6 | `generics`、`records`、`enums`、`callables`＋前方参照 |
+| A10 | `main.rs::run`のcore/collections読込、IOマーカー置換、scalar/containersヘッダーの追加 | 要設計：標準preludeの読込は残せる。ランタイム断片の組立ては共通の依存登録に寄せ、Vecの型置換と混同しない | G2 | `includes`、`buffered_io`、`documentation` |
+
+`lib/core.rusk`の通常のRusk関数、具体的なextern、`lib/collections.rusk`のOption enum、`lib/{io,scalar,containers}.hpp`のランタイムは、すでにライブラリ側の実装である。C++で書かれていること自体は移行理由にならない。coreの基本型・Range等は通常の宣言を生かし、compiler/backendに残る名前依存との接続を整理する。`source.rs`のinclude解決・重複抑止・循環検出も共通の読込基盤として残す。
+
+## 足りない共通基盤
+
+| 記号 | 必要な仕組み | 最初に決めること |
+|---|---|---|
+| G1 | 外部ジェネリック型・関数の宣言、型推論、具体化・キャッシュ | 既存の具体的な`extern type Iter<Int>`と型変数宣言を区別する。通常のジェネリクスと候補解決・重複検査を共有 |
+| G2 | 構造化したC++型・宣言参照、生成名・定義順序 | `{T}`等が表す本体型と`Obj<T>`を含むABI型を区別。C++の波括弧・文字列・コメントと衝突させず、任意の語の広域置換をしない |
+| G3 | 静的関数・クロージャのexternからの呼び出し | 捕捉環境、型、呼び出し位置、保持・返却を扱う。型だけの置換ではアルゴリズムを移せない |
+| G4 | 型の表現・共有先・操作の意味・効果契約・信頼元の共通情報 | 外部C++型とRuskの論理型を分離。未知のexternを安全と仮定せず、標準名に依存しない解析・直接生成を可能にする |
+| G5 | 構文から操作を解決する規約と期待型 | 演算子・反復・構築・入力の規約と、標準関数の専用実装の境界。Optionの`??`等の短絡・共有も保つ |
+| G6 | 任意個のフィールド・payload・次元に対する導出／展開 | 構造体・enum・Tupleの自動copy等と、多次元入力を表す方法。必要性と最小の仕組みを決め、無条件に大きな言語拡張にしない |
+
+## この調査から決める着手順
+
+最初はG1・G2の小さな外部型と関数を、複数の型で具体化して実行する。型のC++表現と外側の`Obj<...>`を区別し、同じC++表現の異なるRusk型を混同しないことを対照にする。ここでは信頼契約・直接展開・コールバックを一度に追加しない。
+
+次にVec移行に必要な操作参照・型情報（G2・G4）を接続する。高階処理はG3、Dict/Setはハッシュ・等値・コピーの解決、Tuple入力と自動操作はG6がそろってから移す。G6が未解決のまま、それらを「コンパイラにしか書けない例外」と確定しない。
+
+段階1時点で例外の候補にするのはN06〜N08、L15〜L16、A07〜A08の言語・解析部分と、A09〜A10の共通のABI・依存順序・読込部分である。**Vec・Dict・Set・Option・Range・高階アルゴリズムを、その名前を理由に残す例外は設けない。** 自動操作の導出境界とG6は、段階2以降の設計事項として残る。
+
+## 検証と更新の方法
+
+各移行では対応行の入口・登録・生成本体・解析情報・最適化を見直し、旧経路を削除してから移行済みとする。各行に挙げた既存テストに加え、別名の利用者extern、複数の具体化、同じC++型の異なるRusk型、無効な型引数・契約を確認する。段階の区切りでは作業計画の全検証と性能比較を実施する。
+
+この棚卸しはソースを読んだ結果で、単純な文字列検索による網羅性の証明ではない。処理の追加・分割・見落としの発見時にはIDを保持して行を追加し、最終整理で各行の移行先または残す根拠を確定する。
+
+## β08での更新
+
+| 対象 | 状態 | 実装と残る仕事 |
+|---|---|---|
+| N02 | Vec・反復型と32操作を通常の宣言へ移行、専用登録・要素制限・広域置換を撤去 | `lib/vec.rusk`をpreludeのジェネリックexternとして読み込む。比較・探索・ソートは要素の通常の操作を解決し、未知の効果には保持と変更検査を保つ。配列反復型も`Iter<Vec<T>>`の型パターンへ接続。配列入力は要素の入力を通常の型付き参照で解決する。配列出力も要素のUnit操作を通常の参照で解決し、操作の専用登録と`lib/vec_compat.rusk`を削除。Vec型も通常の外部型として具体化し、コピー・反復初期化・代入は要素の型付きcopy参照へ接続。Unitと不透明型を一律には除外しない。構文の型ヒント・Tuple等の導出・他のコンテナとそのC++補助は別項目で引き続き移行する |
+| A01 | 基本型・RangeIter・Vec・Dict/Set・遅延反復を宣言へ接続 | 標準の具体・ジェネリック外部型に`representation`を付け、IRへスカラーの種類・要素・キー等を渡す。coreの基本型とRangeIter、`Vec<T>`・`Iter<Vec<T>>`の名前による分類を削除。Dict/Set本体と反復型も通常の外部型の表現情報から分類し、専用登録を削除。Mapped/Filteredも通常の外部型の表現情報から分類し、専用の反復型登録を削除した |
+| A02 | バッファ要素・整数添字を接続、他の契約は未完了 | Str→Charという射影を、宣言されたバッファ要素へ変更。要素契約の添字はスカラー表現で検証し、ネイティブ深いコピーの分類も表現を使う。enum構築・検査付きフィールド取得の契約も宣言されたvariant・fieldを検証し、Some名・variant 0の固定を削除。その他の型・保持の射影と合成は残る |
+| A04 | 集約値の判定をIRの型情報へ接続 | effectsとreadonlyのInt/Bool/Char/Unitの列挙を削除。内部に共有値を持たない型か、宣言・IRから判断する。未知の外部型と不明な共有先は保守的に扱う |
+| A03 | 信頼元の共通化を実装 | `Compiler`への入力で標準・利用者の由来を区別し、関数・具体化へ保持。効果契約とbackendの信頼判定から表示ファイル名への依存を削除。生成物も別の由来として保持する |
+| A09のUnit返却ABI | 共通の参照へ接続 | Unitの通常のvoid返却と、保存するObj<Unit>をアダプタで接続。実装のオブジェクトABIは宣言に明記し、型付き参照・コールバック・自動コピーから共通に利用。coreコピーの前方宣言の不整合を修正。保持済み入力の`rooted_call`と標準専用の`lower_rooted`で重複保持を避け、標準テンプレートの関数定義を参照アダプタの後へ配置する。値参照とUnitの破棄用参照は、返却オブジェクトを受けて引数の後処理が済んでから値の取得・破棄を行う。型・遅延反復等の依存組立ての専用処理は引き続き残る |
+| A02・L04の効果参照と依存 | 共通基盤を追加、型・保持情報の移行は未完了 | `writes`・`writes_invoke`・`fails`で通常の操作と静的コールバックを解決し、LIRの効果解析後に保守的な結果を参照。標準externの型付き参照・コールバックを依存として記録し、参照先の効果が明示した契約を満たすまで外側を不透明にする。未知・循環・保持・別名を楽観的に安全としない。共有先の射影を伴う効果・保持の合成は引き続き残る |
+| L11のTuple・多次元入力 | 標準テンプレートへ移行 | `derive:"tuple_read"`と通常のフィールド入力を使い、Tuple専用のC++本体生成を削除。利用者readerの優先、入力順、Unitと不透明型の格納、途中EOFと診断位置を維持。効果問い合わせも必要時に本体を検査し、入力は消費しない。多次元入力も`derive:"vector_read"`へ移し、返却型パターンの照合と固定引数の列挙・型列参照で組み立てる。形状オブジェクトの追加を避け、各行の長さ取得・全次元の負数検査・利用者readerの優先・元の診断位置を維持する。構文からの導出要求と既存の型判定は残る |
+| L14のTuple出力・6比較 | 通常の操作本体を標準テンプレートへ移行 | `derive:"tuple_write"`の本体・効果・直接生成の式を、通常の型付き参照と依存検査へ接続。フィールドwriterのRuskの論理型・宣言順を保ち、作用が未知なら所有元とフィールドを保持する。通常の利用者writerを使えるTupleにも導出を追加し、Tuple全体の既存のwriterの優先を維持。Tuple・基本型・Vecの旧`write_value`補助を削除。比較も6役割の本体・効果・直接生成の式へ接続。利用者のフィールド比較、未知の作用への保持、Bool要素の順序を通常の宣言で扱う。事前登録は名前の列挙から表現情報へ置換。順序比較のC++補助を削除し、Dict/Setキー用の物理的な等値補助もL09で通常の宣言へ移行 |
+| L13・G6 | 構造体・enumのコピー・代入本体を宣言へ移行、他の導出は未完了 | 構造体とenumのcopyが実際に選んだフィールド操作を記録し、全依存の非変更・非保持・非別名が証明できる場合だけ独立したコピーの契約を有効にする。未知の操作には元のオブジェクトを保持する。構造体・Tuple・捕捉環境・enumのコピー本体は`lib/collections.rusk`の役割を宣言したテンプレートへ移し、明示したフィールド展開と通常の型付き参照で組み立てる。variant・payloadの列挙も共通化し、コピー依存の登録・Unitの格納ABIを通常の参照へ接続。代入本体も標準の役割に接続し、コピーを型付きの参照から呼ぶ。外側の同一性と解放順序を維持し、効果は不透明のまま扱う。集約コピーとその効果問い合わせは必要時導出へ変更し、未使用の型にはフィールドcopyを要求しない。旧遅延反復のコピー本体の依存は引き続き保持する。Tupleの比較・出力はL14で移行済みで、残る導出境界は[操作導出の設計案](https://github.com/shogo314/rusk_b_08/blob/main/design/beta08-aggregate-derivation.md)で移行境界を検討する |
+| N03・N04・L05・L08・L10のDict/Set | 構築・主要26宣言と既定値の補助を移行、型・キー演算もL06・L09で移行 | `lib/hash_collections.rusk`へ移し、構築・操作の専用分岐とC++本体生成、`cached_native`と`container_functions`を削除。キー・値・添字を通常の引数推論へ接続し、型名に依存したヒントを削除。別名の利用者定義でも同じ宣言を実行。Unitの添字と格納は実オブジェクトABIを使い、既定値構築より前のキーのコピーと値の共有を維持。コールバックを呼ばないサイズ・真偽だけ契約を付け、残る操作の効果は不透明とする |
+| L10・L12 | Optionの9宣言を移行、構文・他コンテナは未完了 | Some/None/Option/is_some/is_none/bool/not/value/try_readを`lib/collections.rusk`へ移し、Option特殊化時の自動登録・操作本体の生成・構築の専用経路・Someの型ヒントを削除。Unitの値も共有して返し、入力は通常の型付き参照で解決する。`??`・`?!`に残るOption判定は引き続き移行する。Dict/Setの構築と既定値選択も通常宣言へ移した。反復はL07、型・キー演算はL06・L09で移行 |
+| L03 | 移行済み | first_true・sort_by_key・sort_by_compを`lib/algorithms.rusk`の通常のジェネリックexternへ移し、`higher_order.rs`の専用分岐を削除。別名の利用者定義でも実行する。キーのコピー・比較は型付き参照を使い、基本型に限定する専用判定も削除 |
+| A05 | 宣言に生成情報を接続 | 基本演算・入出力・反復・添字の式をcore/vec宣言の`lower`・`lower_owned`・`lower_borrowed`へ移し、backendの関数名別テーブルを削除。所有・借用の証明は従来の解析で行う。Vecの基本操作も通常のジェネリック宣言へ接続し、広域置換を削除 |
+| A06 | 表現と代入の情報を接続 | `operation:"assign"`に加え、IRのスカラー表現で直接保持・共有の候補を選ぶ。scalar_aliasesとcppの基本型名の列挙を削除。Unit返却・Bool条件等の言語上の規約はA08の検査として維持する |
+| L02 | 移行済み | all/any/fold/scan/to_vecを`lib/algorithms.rusk`の通常の宣言へ移し、共通の専用生成ブロックを削除。反復・コピー・コールバックは型付き参照から解決し、利用者定義のジェネリックな反復型でも動かす |
+| N01・N06・L04・L05・L16・A09 | 基盤を追加、専用経路の移行は未完了 | 外部型・関数の具体化、型・関数・コールバックの参照、未使用宣言の検査、外部関数の前方宣言・相互再帰を実装。操作本体と型・効果情報の移行はこれから |
+| L04・L07 | Dict/Setの反復型と操作を通常の宣言へ移行 | `Iter<Dict<K,V>>`・`Iter<Set<K>>`と生成・恒等・有無・次要素・コピーを`lib/hash_collections.rusk`へ移した。所有元を保持する共通のC++レイアウトを使用し、キーをコピー、辞書の値を共有し、完了状態と変更検出を維持。コンパイラの反復型生成・操作生成・専用guard生成を削除。遅延反復の要素型は通常の`__iter_next__`の結果から取得し、元の反復子のコピーも型付きで解決する。従来C++の汎用コピーに頼っていた配列反復子とRangeIterにも通常のcopy宣言を追加。Dict/Set本体の型・キー演算はL06・L09で移行。遅延反復の残る生成は引き続き対象とする |
+| L06・L09のコピー・代入 | 通常のジェネリックexternへ移行、型とキー演算も下記で移行 | Dict/Setのcopy・`__assign__`を宣言へ移し、自動登録・コピー本体・前方宣言・依存キャッシュを削除。要素copyは実際の要求時に解決し、型の使用だけでは要求しない。条件付きの効果と所有付き／保持済み参照へ接続し、未知のコピー・元要素の解放後の構造変更を検査する。代入は新しい表を反映してから旧要素を解放し、再変更を検出する。別名の利用者定義、深いコピー・共有・Unit・readonly/noescapeと失敗経路を検証。型登録・キー制限・ハッシュ・等値も下記で通常の宣言へ移行 |
+| G1・G2・A09の外部型と関数 | 外部型の`cpp_name`から値返却アダプタを参照可能にした | 論理型で操作を解決し、関数の署名登録後に型のC++表現を準備する。型別名と関数宣言の明示的な依存を並べ、構造体・入れ子の外部型・修飾名付きextern・Unitを扱う。循環・不足する操作・未使用宣言の不正な記法・具体化数と宣言依存の上限を検査。既存115ケースの生成C++が変更前と一致することを確認。Dict/Setの型とキー演算への適用、保持と効果の合成、任意のC++断片の依存は未完了 |
+| L06・L09・A01のDict/Set本体 | 型・キー演算を通常の宣言へ移行 | 外部型に`dict<K,V>`・`set<K>`の表現を付け、値返却ABIの関数参照をC++型へ渡す。キーの適用条件は論理型の本体分岐とTuple限定のフィールド展開で記述し、コンパイラの型登録・キー列挙・ハッシュ／等値生成・IRの専用分類を削除。`containers.rs`を撤去し、入力規約の残る要求だけを`input.rs`へ分離。旧C++の物理的なTuple等値と汎用hash/value_equal補助を削除。別名の外部型とキー演算も同じ基盤で実行。保持・効果の合成と全体の最終比較は継続 |
+| L01・L04・L05・A09の遅延反復 | 型・操作・状態コピーを通常の宣言へ移行 | `lib/lazy_iterators.rusk`へMapped/Filteredとmap/filter・恒等・有無・次要素・copy・代入の12関数、状態レイアウトと再帰guardを移した。型・関数・捕捉付き呼び出し・ABIの共通参照を使用し、`higher_order.rs`と`iterator_types`、専用の前方宣言・コピー組立てを削除。導出用の関数登録だけを`native_functions.rs`へ分離した。別名の利用者宣言、キャッシュ・捕捉・位置のコピー、外側の別名、Unit入力と結果の拒否、無効化の検出を検証する。型を使うだけでは要素copyを要求しない。共有先・保持の射影と効果の合成、任意のランタイム断片の依存順序は継続 |
+| A02・G4の保持先と返却別名 | 宣言からIR・readonly/noescapeへ接続 | 標準の外部型に保持メンバー、関数に結果と引数の別名対応を追加。論理型とパス・上限・信頼元を検査する。Vec・Dict/Setの反復子のownerと、遅延反復のsource・callback・cachedを宣言し、閉じた反復子の構築・コピー・恒等操作の共有を伝える。別名の不透明な標準型とRusk関数越しでも解析する。未知の操作の効果合成、呼び出し外の別の場所への保持・書き込みの対応は継続 |
+| A02・G4の子の効果と返却別名の合成 | 共通の対応付きcall/invoke参照と遅延copyへ適用 | 子の引数・結果を外側の引数・保持先へ対応付け、通常の署名・ABI・論理型で検査する。子の効果を固定点で解決して合成し、所有元の共有を保つ。破棄結果の局所性、捕捉環境、変更・外部保持・IO・失敗・停止性を扱い、直接または子の変更後は、別の引数が後続の操作の対象になる可能性に備えて引数効果も保守的に広げ、返却元を不明へ広げる。未知・循環と対応のない参照は安全と仮定しない。遅延copyに適用し、非変更の場合だけ追加保持を省く。他の遅延操作・導出・反復アルゴリズム、共通の読込と依存順序、例外の確定と全体の最終比較は継続 |
+| A09・A10のランタイム読込とシンボル依存 | 通常の宣言と共通ローダーへ移行 | 標準preludeを通常のinclude、C++資源をcode_file/code_files、断片間の生成順をdependsへ移した。利用者にも同じ読込と依存検査を使い、mainのマーカー置換とヘッダー追記を削除。資源カタログは梱包に限定し、信頼元はSourceで保持する。相対パス・重複・循環・不正な依存・制限・原文保持・単独実行と利用者の信頼境界を検証。既存121入力の両モード、計242ケースの生成C++が373a656と全文一致。論理型・関数署名とレイアウトの依存は既存の共通基盤として最終監査する |
+| N07・L12の??・?! | 型名・variant位置の固定を通常の操作宣言へ移行 | 短絡と評価順・初期化は構文に維持し、有無と取得を通常の候補解決へ接続。標準enumの意味情報を検査し、同じvariantの検査済み取得は従来のIRへ接続する。任意のvariant/payload番号と論理型・Unit ABIを検証し、参照した呼び出しを省かない。別名の標準enum、利用者のChoice/Envelope、標準Noneとの期待型の共存とreadonly/noescapeを検証。予約名・bare None等の分類と他の効果・保存先の対応、最終監査・性能比較は継続 |
+| N05の標準名予約 | 通常の型系列・関数署名検査へ統合 | Vec・Option・Iterは標準宣言がなければ通常の利用者型名として使え、標準宣言があるときは他の型と同じ衝突検査を使う。Some・None・Option・try_readの別引数の通常／ジェネリック関数を受理し、同一のジェネリック署名は拒否する。内部生成名とTupleの予約だけを共通の型宣言検査へ集約し、具体externの抜け道も拒否する。bare Noneの式の判定と効果・保存先・最終監査は継続 |
+| N07のbare None | ゼロ引数の呼び出し規約を宣言へ移行 | 具体・ジェネリックexternのimplicit_callを共通に検査・登録し、Noneという名前の判定を削除。利用者の別名の宣言も通常の期待型・候補解決・副作用・共有ABI・未知の効果を使う。ローカル変数と通常の関数値の規則、標準の空値構築を維持する。型名・予約名とbare値の専用判定の移行後も、配列・範囲・for等の構文規約と型ヒントは最終監査する |
+| N01・N06の未使用署名の型参照 | 未宣言Iterの特例を削除 | Iterと別名のStreamを同じ宣言・型引数の個数検査へ接続し、署名・戻り型・外部型のC++型参照で未宣言を拒否。標準を読まない入力で修正前の不整合を再現してから、宣言の有無の両方を検証した。残すTupleの個数検査はタプル構文の言語基盤に限定する |
+| A02・G4の子の結果の保存先 | 引数の保持先・フィールド・内容の保存へ接続 | 対応付きのcall/invokeで既存の引数への保存先を型検査し、書き込み・構造変更・返却別名からの外部保持を合成。独立した子の結果だけでは入力を保持せず、不明な結果・共有先変更は全引数へ保守的に広げる。遅延状態の代入へ適用し、独立したRange状態・スカラー捕捉を許可し、配列所有元の共有はnoescape違反として検出する。別名の標準関数・捕捉付きコールバック・物理フィールド・宣言された保持先・論理型・未選択分岐・信頼境界を検証する。他の操作と導出への適用、例外の確定と最終性能比較は継続 |

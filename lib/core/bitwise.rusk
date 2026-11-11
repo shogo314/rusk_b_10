@@ -1,0 +1,20 @@
+extern fn __bitand__(a: Int, b: Int) -> Int {
+    lower: "(*$0 & *$1)",
+    effects: "read_fresh",
+    cpp_name: "rusk_bitand_int",
+    code: "Obj<std::int64_t> rusk_bitand_int(Obj<std::int64_t> a, Obj<std::int64_t> b, Loc) { return make_obj<std::int64_t>(*a & *b); }",
+}
+
+extern fn __bitor__(a: Int, b: Int) -> Int {
+    lower: "(*$0 | *$1)",
+    effects: "read_fresh",
+    cpp_name: "rusk_bitor_int",
+    code: "Obj<std::int64_t> rusk_bitor_int(Obj<std::int64_t> a, Obj<std::int64_t> b, Loc) { return make_obj<std::int64_t>(*a | *b); }",
+}
+
+extern fn __bitxor__(a: Int, b: Int) -> Int {
+    lower: "(*$0 ^ *$1)",
+    effects: "read_fresh",
+    cpp_name: "rusk_bitxor_int",
+    code: "Obj<std::int64_t> rusk_bitxor_int(Obj<std::int64_t> a, Obj<std::int64_t> b, Loc) { return make_obj<std::int64_t>(*a ^ *b); }",
+}

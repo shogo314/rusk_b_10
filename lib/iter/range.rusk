@@ -1,0 +1,40 @@
+//! 整数範囲とその走査状態です。
+
+/// `start..end` で作る、終端を含まない整数範囲です。
+extern type Range {
+    cpp_name: "RuskRange",
+}
+/// 整数範囲の次の位置と終端を保持する走査状態です。
+extern type RangeIter {
+    cpp_name: "RuskRangeIter",
+    representation: "iterator<Int>",
+}
+/// 現在の位置と終端をコピーした範囲の走査状態を返します。
+extern fn copy(it: RangeIter) -> RangeIter {
+    lower_owned: "make_obj<RuskRangeIter>(*$0)",
+    effects: "read_fresh",
+    code: "Obj<RuskRangeIter> copy_range_iterator(Obj<RuskRangeIter> it, [[maybe_unused]] Loc loc) { return make_obj<RuskRangeIter>(*it); }",
+    cpp_name: "copy_range_iterator",
+}
+extern fn __range__(start: Int, end: Int) -> Range {
+    effects: "read_fresh",
+    cpp_name: "basic_function_0",
+    code: "Obj<RuskRange> basic_function_0(Obj<std::int64_t> start, Obj<std::int64_t> end, [[maybe_unused]] Loc loc) { return make_obj<RuskRange>(RuskRange{*start,*end}); }",
+}
+extern fn __iter__(r: Range) -> RangeIter {
+    effects: "read_fresh",
+    cpp_name: "basic_function_1",
+    code: "Obj<RuskRangeIter> basic_function_1(Obj<RuskRange> r, [[maybe_unused]] Loc loc) { return make_obj<RuskRangeIter>(RuskRangeIter{r->start,r->end}); }",
+}
+extern fn __iter_has_next__(it: RangeIter) -> Bool {
+    lower: "($0->next < $0->end)",
+    effects: "read_fresh",
+    cpp_name: "basic_function_2",
+    code: "Obj<bool> basic_function_2(Obj<RuskRangeIter> it, [[maybe_unused]] Loc loc) { return make_obj<bool>(it->next<it->end); }",
+}
+extern fn __iter_next__(it: RangeIter) -> Int {
+    lower: "rusk_range_next($0, $loc)",
+    effects: "checked_mutate_fresh",
+    cpp_name: "basic_function_3",
+    code: "Obj<std::int64_t> basic_function_3(Obj<RuskRangeIter> it, [[maybe_unused]] Loc loc) { if(it->next>=it->end) fail(loc,\"iterator exhausted\"); auto value=it->next; ++it->next; return make_obj<std::int64_t>(value); }",
+}

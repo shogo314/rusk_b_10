@@ -1,0 +1,15 @@
+fn half(readonly noescape value: Float) -> Float {
+    return value / 2.0;
+}
+
+readonly let original := 1.25e-3;
+let independent = original;
+let shared := independent;
+independent *= 2.0;
+wt original, half(shared), shared;
+wt format_fixed(2.5, 3), Int(-3.9), floor(-1.5), ceil(-1.5), round(-1.5);
+
+let negative_zero := -0.0;
+let nan := 0.0 / 0.0;
+wt negative_zero, 1.0 / negative_zero, is_nan(nan), nan == nan, nan != nan;
+wt Float(Str(5e-324)) == 5e-324;
