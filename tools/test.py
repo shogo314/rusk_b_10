@@ -65,18 +65,20 @@ def run_public(results):
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument(
-        '--suite', choices=('all', 'local', 'sanitizers', 'public'), default='all',
-        help='all (default), local (fmt/clippy/Cargo), sanitizers, or public judges',
+        '--suite', choices=('all', 'local', 'checks', 'tests', 'reference', 'sanitizers', 'public'), default='all',
+        help='all (default), local (checks/tests/reference), individual CI stages, sanitizers, or public judges',
     )
     parser.add_argument('--no-leaks', action='store_true', help='disable LeakSanitizer in ptrace environments')
     args = parser.parse_args()
     results = []
     try:
-        if args.suite in ('all', 'local'):
+        if args.suite in ('all', 'local', 'checks'):
             run_stage('Formatting', [['cargo', 'fmt', '--check']], results)
             run_stage('Rusk formatting', [['cargo', 'build', '--locked'], [sys.executable, 'tools/check_format.py']], results)
             run_stage('Clippy', [['cargo', 'clippy', '--locked', '--all-targets', '--', '-D', 'warnings']], results)
+        if args.suite in ('all', 'local', 'tests'):
             run_stage('Cargo tests (E2E + AtCoder)', [['cargo', 'test', '--locked']], results)
+        if args.suite in ('all', 'local', 'reference'):
             reference_env = os.environ.copy()
             reference_env['RUSK_TEST_NO_OPT'] = '1'
             reference_command = ['cargo', 'test', '--locked']

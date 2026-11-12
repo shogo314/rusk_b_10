@@ -8,6 +8,9 @@
 |---|---|
 | `python3 tools/test.py` | ローカル、サニタイザー、公開問題の全段階 |
 | `python3 tools/test.py --suite local` | fmt・Clippy・通常のCargoテスト・最適化無効版の回帰検証 |
+| `python3 tools/test.py --suite checks` | Rust・Ruskの整形とClippy |
+| `python3 tools/test.py --suite tests` | 通常のCargoテストとAtCoderのサンプル |
+| `python3 tools/test.py --suite reference` | 最適化無効版の回帰検証 |
 | `python3 tools/test.py --suite sanitizers` | ASan・UBSan・LeakSanitizer |
 | `python3 tools/test.py --suite public` | AOJ・Library Checkerの公開テスト |
 
@@ -102,7 +105,7 @@ oj-verify run examples/library_checker/unionfind.test.rusk
 
 Rusk・C++資源の依存ファイルに加え、処理系・文法・標準ライブラリ・検証スクリプトも依存として登録します。変更後は再検証され、変更がなければ成功履歴から省略される場合があります。ケースと生成物は`.verify-helper/cache/`、成功履歴は`.verify-helper/timestamps.local.json`にあります。Gitには含めません。
 
-CIの`Test`ワークフローも共通入口を使い、公開ケースをキャッシュします。ローカルの公開ケース検証はオンライン提出・ACの確認とは別です。verification-helperの既定の実行時間制限は1ケース60秒で、各サイトの環境と制限時間を再現するものではありません。
+CIの`Test`ワークフローも共通入口を使い、checks・tests・reference・sanitizers・publicを独立したジョブで実行します。単独ジョブの時間制限で後半の検証が実行できなくなることを防ぎ、一つが失敗してもほかのジョブを継続します。公開ケースはpublicジョブでキャッシュします。ローカルの公開ケース検証はオンライン提出・ACの確認とは別です。verification-helperの既定の実行時間制限は1ケース60秒で、各サイトの環境と制限時間を再現するものではありません。
 
 ## 文書例
 
