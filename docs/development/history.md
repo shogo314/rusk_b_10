@@ -16,5 +16,6 @@
 - [β08の移行境界と残す基盤の監査](beta08-boundaries.md)
 - [β08とβ07の全体性能比較](beta08-performance.md)
 - [β09の作業計画と検証](beta09.md)
+- [β10の作業計画と検証](beta10.md)
 - [enumとOption移行の実装](enums.md)
 - [CST・AST・HIR・LIRとC++生成](pipeline-history.md)

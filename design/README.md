@@ -20,7 +20,7 @@
 
 概要は[将来の方針](../docs/future.md)、処理系とライブラリの分担は[アーキテクチャ](../docs/development/architecture.md)にある。
 
-現在の実装範囲と進め方は[作業計画](../docs/development/plan.md)を参照する。
+現在の実装範囲は[対応範囲](../docs/reference/status.md)、次版の検討状況は[作業計画](../docs/development/plan.md)、β10の完成条件と検証結果は[開発記録](../docs/development/beta10.md)を参照する。
 
 ## 過去の記録
 
