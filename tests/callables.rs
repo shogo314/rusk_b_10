@@ -75,7 +75,7 @@ fn callable_errors_are_rusk_diagnostics() {
         "let f:=(x:Int)=>x;wt f(true);",
         "let f:=(x:Int)=>x;wt f();",
         "let f:=1;f();",
-        "fn f(x:Int)->Int{return x;} fn f(x:Str)->Str{return x;}let g:=f;",
+        "fn f(x:Int)->Int{return x;} fn f(x:Int)->Int{return x;}let g:=f;g(1);",
         "let a:=(x:Int)=>x;let b:=(x:Int)=>x+1;a:=b;",
         "let x:=1;let f:=()=>x;wt f.x;",
         "let x:=1;let f:=()=>x;f.x:=2;",

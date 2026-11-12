@@ -64,6 +64,7 @@ impl Compiler {
         }
     }
     pub(super) fn abi_reference(&mut self, index: usize, object: bool) -> String {
+        self.native_requests.direct.insert((index, object));
         if self.functions[index].result == "Unit" && object != self.native_unit_object(index) {
             self.native_requests.unit_bridges.insert((
                 index,
@@ -79,7 +80,7 @@ impl Compiler {
                 self.native_requests.declarations.insert(index);
             }
         }
-        self.abi_reference_name(index, object)
+        format!("rusk_pending_reference_{index}_{object}__")
     }
     pub(super) fn register_extern_type(
         &mut self,
@@ -237,6 +238,7 @@ impl Compiler {
         }
         effects::extern_parameter_contract(arguments, properties)?;
         let definition = generics::GenericFunction {
+            scope: self.context.declaration_scope,
             name: name.clone(),
             parameters: parameters.to_vec(),
             arguments: arguments.to_vec(),
@@ -1079,11 +1081,11 @@ impl Compiler {
                     route,
                 } => {
                     let ty = generics::substitute(&name, bindings);
-                    let callback = self.callables.get(&ty).cloned().ok_or_else(|| {
-                        span.error(format!("type '{ty}' is not statically callable"))
-                    })?;
                     let arguments =
                         self.expand_native_arguments(&arguments, bindings, owner, budget, span)?;
+                    let expected = generics::substitute(&result, bindings);
+                    let callback =
+                        self.specialize_callable(&ty, &arguments, Some(&expected), span)?;
                     if callback.parameters != arguments {
                         return Err(span.error("native callback parameter type mismatch"));
                     }

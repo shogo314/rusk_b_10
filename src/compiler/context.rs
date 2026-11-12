@@ -2,10 +2,11 @@
 use super::Compiler;
 use crate::frontend::ast::Name;
 use crate::ir::hir::{Body, Value, ValueId};
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 
 #[derive(Clone)]
 pub(super) struct Variable {
+    pub(super) scope: super::scopes::ScopeId,
     pub(super) id: ValueId,
     pub(super) ty: String,
     pub(super) initialized: bool,
@@ -23,6 +24,9 @@ pub(super) struct LoopContext {
 
 #[derive(Default)]
 pub(super) struct FunctionContext {
+    pub(super) ready_generics: BTreeSet<usize>,
+    pub(super) ready_functions: BTreeSet<usize>,
+    pub(super) declaration_scope: super::scopes::ScopeId,
     pub(super) current_function: Option<usize>,
     pub(super) scopes: Vec<BTreeMap<String, Variable>>,
     pub(super) body: Body,

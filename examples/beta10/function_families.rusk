@@ -1,0 +1,76 @@
+//! 候補群を名前のまま渡し、呼び出す引数型に応じて具体化する。
+fn apply<T, F>(value: T, operation: F) -> T {
+    return operation(value);
+}
+let operation := copy;
+wt apply(3, operation), apply("abc", operation);
+fn duplicate<T>(value: T) -> T {
+    return value + value;
+}
+wt [1, 2].map(duplicate).to_vec();
+
+let next := {
+    let count := 0;
+    fn advance<T>(unused: T) -> Int {
+        count += 1;
+        return count;
+    }
+    advance
+};
+let detached = next;
+wt detached(0), detached("a"), next(0), next("a");
+
+// 保存した環境と、引数型の関連操作が呼び出し時に使う環境を組み合わせる。
+fn read_value<T>(item: T) -> Int {
+    return item_value(item);
+}
+let combined := {
+    let count := 0;
+    fn combine<T>(item: T) -> Int {
+        count += 1;
+        return count + read_value(item);
+    }
+    combine
+};
+let independent = combined;
+{
+    let offset := 10;
+    struct Item {
+        value: Int;
+    }
+    fn item_value(item: Item) -> Int {
+        return item.value + offset;
+    }
+    wt combined(
+        Item {
+            value: 1
+        }
+    ), independent(
+        Item {
+            value: 1
+        }
+    ), combined(
+        Item {
+            value: 1
+        }
+    );
+    wt [
+        Item {
+            value: 1
+        }
+    ].map(combined).to_vec();
+}
+
+let text := "ab";
+{
+    let ch := text[0];
+    fn first<T>(unused: T) -> Char {
+        return ch;
+    }
+    let read := first;
+    let independent = read;
+    read(0) = 'Z';
+    wt read(0), independent("a");
+}
+text.push_back('!');
+wt text;

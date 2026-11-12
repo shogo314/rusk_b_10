@@ -9,6 +9,12 @@ import tempfile
 
 ROOT = Path(__file__).resolve().parents[1]
 CASES = [
+    ((ROOT/'examples/beta10/copied_recursion.rusk').read_text(),b'',b'3 1\n2\n4 4\n'),
+    ((ROOT/'examples/beta10/function_families.rusk').read_text(),b'',b'3 abc\n2 4\n1 2 1 2\n12 12 13\n14\nZ a\nZb!\n'),
+    ((ROOT/'examples/beta10/native_captures.rusk').read_text(),b'',b'1 102 2\n3 3\nZ a\nZb!\n1112\n102\n'),
+    ((ROOT/'examples/beta10/local_types.rusk').read_text(),b'',b'7 7\n3\n12 22\n13 13\n1 2\n'),
+    ((ROOT/'examples/beta10/local_generics.rusk').read_text(),b'',b'3 2 a 2\n2 9\n4 5 5\nZ a\nZb!\n1 2 1 2\n'),
+    ((ROOT/'examples/beta10/local_functions.rusk').read_text(),b'',b'3\n1 101 2\n3 3\n4\n5 5\na\nZb!\n'),
     ((ROOT/'examples/beta09/aggregation.rusk').read_text(),b'',b'7 20 1.75\n1 3 1 0\n3 9 1 2\n8 Yes Yes\n-0 1\n'),
     ((ROOT/'examples/beta09/iteration_adapters.rusk').read_text(),b'',b'3 6 9\n9 10\n6 11 3 12 9 10 6 11 3 12\nabX! 5 4 3\n'),
     ((ROOT/'examples/beta09/ordering.rusk').read_text(),b'',b'Yes Yes Yes\nb a c\nnan -inf -0 0 inf nan\nYes Yes\n'),

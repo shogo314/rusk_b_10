@@ -86,7 +86,7 @@ def main():
                 'beta04_structures', 'beta05', 'pipeline', 'cli', 'format', 'blocks_labels',
                 'enums', 'test_support', 'beta06', 'minmax', 'effects', 'bindings', 'readonly',
                 'readonly_routes', 'documentation', 'api', 'noescape', 'noescape_routes',
-                'heap_aliases', 'numeric',
+                'heap_aliases', 'numeric', 'overloads',
             ):
                 reference_command += ['--test', test]
             run_stage('Reference backend (no scalar optimization)',

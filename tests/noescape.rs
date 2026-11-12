@@ -248,8 +248,8 @@ fn parameter_only_syntax_conflicts_and_overloads_are_rejected() {
             "conflicting escape modifiers",
         ),
         (
-            "fn f(noescape x:Int){}fn f(escape x:Int){}",
-            "duplicate function",
+            "fn f(noescape x:Int){}fn f(escape x:Int){}f(1);",
+            "ambiguous call",
         ),
     ] {
         let output = Case::new(source).compile();

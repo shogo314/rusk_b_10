@@ -1,0 +1,71 @@
+//! externの型付き参照にも、呼び出す関数値の捕捉環境を渡す。
+extern fn advance<T>(item: T) -> Int {
+    code: "Obj<@{Int}> @{fn}(Obj<@{T}> item,Loc loc){return @{call step(T)->Int}(item,loc);}",
+}
+extern fn character<T>(item: T) -> Char {
+    code: "Obj<@{Char}> @{fn}(Obj<@{T}> item,Loc loc){return @{call first(T)->Char}(item,loc);}",
+}
+let make := (start: Int) => {
+    let count := start;
+    struct Item {
+        amount: Int;
+    }
+    fn step(item: Item) -> Int {
+        count += item.amount;
+        return count;
+    }(amount: Int) => advance(
+        Item {
+            amount: amount
+        }
+    )
+};
+let a := make(0);
+let b := make(100);
+wt a(1), b(2), a(1);
+let detached = a;
+wt detached(1), a(1);
+
+let text := "ab";
+{
+    let ch := text[0];
+    struct Item {
+        unused: Int;
+    }
+    fn first(item: Item) -> Char {
+        return ch;
+    }
+    let read := () => character(
+        Item {
+            unused: 0
+        }
+    );
+    let independent = read;
+    read() = 'Z';
+    wt read(), independent();
+}
+text.push_back('!');
+wt text;
+
+// 同じ宣言に再入しても、内側の呼び出し後は外側の環境に戻る。
+extern fn twice<T>(item: T) -> Int {
+    code: "Obj<@{Int}> @{fn}(Obj<@{T}> item,Loc loc){auto a=*@{call step(T)->Int}(item,loc);auto b=*@{call step(T)->Int}(item,loc);return make_obj<@{Int}>(a*100+b);}",
+}
+fn recursive(start: Int) -> Int {
+    let count := start;
+    struct Item {
+        unused: Int;
+    }
+    fn step(item: Item) -> Int {
+        count += 1;
+        if count == 1 {
+            wt recursive(10);
+        }
+        return count;
+    }
+    return twice(
+        Item {
+            unused: 0
+        }
+    );
+}
+wt recursive(0);

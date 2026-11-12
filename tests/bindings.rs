@@ -148,12 +148,12 @@ fn modifier_conflicts_and_duplicate_overloads_are_diagnosed() {
         rejects(source, "conflicting binding modifiers");
     }
     rejects(
-        "fn f(fixed x:Int){}fn f(rebindable x:Int){}",
-        "duplicate function",
+        "fn f(fixed x:Int){}fn f(rebindable x:Int){}f(1);",
+        "ambiguous call",
     );
     rejects(
-        r#"extern fn f(fixed x:Int){cpp_name:"f",code:"unused",}extern fn f(rebindable x:Int){cpp_name:"g",code:"unused",}"#,
-        "duplicate function",
+        r#"extern fn f(fixed x:Int){cpp_name:"f",code:"unused",}extern fn f(rebindable x:Int){cpp_name:"g",code:"unused",}f(1);"#,
+        "ambiguous call",
     );
 }
 

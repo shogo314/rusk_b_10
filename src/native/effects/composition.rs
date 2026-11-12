@@ -132,6 +132,18 @@ pub(crate) struct Dependency {
     arguments: Vec<(usize, Vec<Projection>)>,
     result: Destination<Vec<Projection>>,
 }
+impl Dependency {
+    pub(crate) fn with_environment_arguments(
+        &self,
+        arguments: impl IntoIterator<Item = usize>,
+    ) -> Self {
+        let mut result = self.clone();
+        result
+            .arguments
+            .extend(arguments.into_iter().map(|parameter| (parameter, vec![])));
+        result
+    }
+}
 
 /// Only resolved child effects can discharge a native dependency. Unknown
 /// externs and native call cycles remain opaque during the fixed point;

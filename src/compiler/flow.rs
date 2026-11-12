@@ -22,12 +22,11 @@ impl Compiler {
         match binding {
             Binding::Name(name) => {
                 if name.text != "_" {
-                    if self.context.scopes.last().unwrap().contains_key(&name.text) {
-                        return Err(name.span.error("duplicate variable"));
-                    }
+                    self.check_variable_name(&name.name)?;
                     self.context.scopes.last_mut().unwrap().insert(
                         name.text.clone(),
                         Variable {
+                            scope: self.context.declaration_scope,
                             id: ValueId::Probe,
                             ty: ty.into(),
                             initialized: true,
@@ -95,34 +94,38 @@ impl Compiler {
         self.context.scopes.push(BTreeMap::new());
         let mut result = Value::never();
         let slot = self.temp();
-        let body = self.capture(|c| {
-            for statement in statements {
-                c.statement(statement)?;
-            }
-            if c.context.diverged
-                && let Some(tail) = tail
-            {
-                c.statement(&Stmt::Expr(tail.clone()))?;
-            }
-            if !c.context.diverged {
-                result = if let Some(tail) = tail {
-                    c.expr(tail, expected)?
-                } else {
-                    c.literal("Unit", "", span)?
-                };
-                if !c.context.diverged {
-                    if let Some(expected) = expected {
-                        c.same(expected, &result.ty, span)?;
-                    }
-                    c.context.body.push(Instruction::Rebind {
-                        span: None,
-                        target: Place::Local(slot.clone()),
-                        value: result.clone(),
-                    });
-                    c.release_temps();
+        let body = self.with_declaration_scope(|c| {
+            c.capture(|c| {
+                let statements = c.prepare_block_declarations(statements)?;
+                let tail = tail.map(|tail| c.scoped_expression(tail));
+                for statement in &statements {
+                    c.statement(statement)?;
                 }
-            }
-            Ok(())
+                if c.context.diverged
+                    && let Some(tail) = &tail
+                {
+                    c.statement(&Stmt::Expr(tail.clone()))?;
+                }
+                if !c.context.diverged {
+                    result = if let Some(tail) = &tail {
+                        c.expr(tail, expected)?
+                    } else {
+                        c.literal("Unit", "", span)?
+                    };
+                    if !c.context.diverged {
+                        if let Some(expected) = expected {
+                            c.same(expected, &result.ty, span)?;
+                        }
+                        c.context.body.push(Instruction::Rebind {
+                            span: None,
+                            target: Place::Local(slot.clone()),
+                            value: result.clone(),
+                        });
+                        c.release_temps();
+                    }
+                }
+                Ok(())
+            })
         })?;
         self.context.scopes.pop();
         self.context.pending_temps = outer;

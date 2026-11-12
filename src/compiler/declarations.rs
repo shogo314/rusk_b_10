@@ -2,6 +2,63 @@
 use super::*;
 
 impl Compiler {
+    pub(super) fn prepare_block_declarations(
+        &mut self,
+        statements: &[Stmt],
+    ) -> Result<Vec<Stmt>, String> {
+        self.declare_local_type_names(statements)?;
+        let statements = self.scoped_statements(statements);
+        let origin = self
+            .context
+            .current_function
+            .map_or(Origin::User, |id| self.functions[id].origin);
+        let declarations = statements
+            .iter()
+            .filter(|s| {
+                matches!(
+                    s,
+                    Stmt::UserFunction(..) | Stmt::Struct(..) | Stmt::Enum(..)
+                )
+            })
+            .cloned()
+            .collect::<Vec<_>>();
+        for statement in &declarations {
+            let Stmt::UserFunction(name, ..) = statement else {
+                continue;
+            };
+            if self
+                .context
+                .scopes
+                .last()
+                .is_some_and(|s| s.contains_key(&name.text))
+            {
+                return Err(name
+                    .span
+                    .error(format!("function conflicts with variable '{}'", name.text)));
+            }
+        }
+        let sources = [Source {
+            statements: declarations,
+            origin,
+        }];
+        self.register_types(&sources)?;
+        self.register_enum_declarations(&sources)?;
+        for statement in &sources[0].statements {
+            match statement {
+                Stmt::Struct(name, parameters, _) if parameters.is_empty() => {
+                    self.prepare_record(&name.text)?
+                }
+                Stmt::Enum(name, parameters, _) if parameters.is_empty() => {
+                    self.check_type(name)?
+                }
+                _ => {}
+            }
+        }
+        self.register_generic_functions(&sources)?;
+        self.register_concrete_declarations(&sources)?;
+        Ok(statements)
+    }
+
     pub(super) fn register_declarations(&mut self, sources: &[Source]) -> Result<(), String> {
         generics::validate_type_declarations(sources)?;
         self.register_types(sources)?;
@@ -20,6 +77,7 @@ impl Compiler {
                     && !parameters.is_empty()
                 {
                     self.register_generic_function(generics::GenericFunction {
+                        scope: self.context.declaration_scope,
                         name: name.clone(),
                         parameters: parameters.clone(),
                         arguments: arguments.clone(),
@@ -201,16 +259,6 @@ impl Compiler {
                             .map(|r| r.text.clone())
                             .unwrap_or("Unit".into());
                         let params: Vec<_> = params.iter().map(|(_, t)| t.text.clone()).collect();
-                        if let Some(old) = self.functions.iter().find(|f| {
-                            f.name.text == n.text
-                                && f.params == params
-                                && (!return_selected(&n.text) || f.result == result)
-                        }) {
-                            return Err(n.span.error(format!(
-                                "duplicate function; previous definition at {}:{}:{}",
-                                old.name.span.file, old.name.span.line, old.name.span.column
-                            )));
-                        }
                         if let Stmt::Function(_, arguments, _, properties) = s {
                             let native = self.declared_native_effects(
                                 n,
@@ -234,7 +282,19 @@ impl Compiler {
                                 source.origin,
                             )?;
                         }
+                        if self.context.declaration_scope != scopes::ScopeId::ROOT
+                            && matches!(s, Stmt::UserFunction(..))
+                        {
+                            self.environments.locals.insert(
+                                self.functions.len(),
+                                local_captures::LocalFunction {
+                                    owner: self.context.current_function,
+                                    ..Default::default()
+                                },
+                            );
+                        }
                         self.functions.push(Function {
+                            scope: self.context.declaration_scope,
                             name: n.clone(),
                             params,
                             result,

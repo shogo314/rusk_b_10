@@ -17,15 +17,19 @@ mod enums;
 mod expressions;
 mod externs;
 mod flow;
+mod function_families;
 mod generics;
 mod input;
 mod ir_types;
+mod local_captures;
+mod local_types;
 mod native_functions;
 mod native_info;
 mod ordering;
 mod patterns;
 mod pipeline;
 mod records;
+mod scopes;
 mod symbols;
 mod tuples;
 mod type_metadata;
@@ -65,6 +69,7 @@ impl<'a> IntoIterator for &'a Source {
 
 #[derive(Clone)]
 struct Function {
+    scope: scopes::ScopeId,
     name: Name,
     params: Vec<String>,
     result: String,
@@ -76,6 +81,10 @@ struct Function {
 }
 #[derive(Default)]
 pub struct Compiler {
+    local_types: local_types::LocalTypes,
+    environments: local_captures::Environments,
+    declaration_scopes: scopes::DeclarationScopes,
+    type_declaration_scopes: BTreeMap<String, scopes::ScopeId>,
     context: FunctionContext,
     expression_depth: usize,
     types: BTreeMap<String, String>,
@@ -85,7 +94,8 @@ pub struct Compiler {
     enum_copy_functions: BTreeMap<String, usize>,
     preparing_enums: Vec<String>,
     callables: BTreeMap<String, callables::Callable>,
-    function_types: BTreeMap<usize, String>,
+    families: BTreeMap<String, function_families::Family>,
+    family_types: BTreeMap<(String, Vec<scopes::ScopeId>), String>,
     lambda_types: BTreeMap<String, String>,
     lambda_counter: usize,
     capture_contexts: Vec<callables::CaptureContext>,
@@ -130,6 +140,27 @@ fn validate(n: &Name, p: &BTreeMap<String, String>, allowed: &[&str]) -> Result<
     }
     Ok(())
 }
+
+fn ambiguous_call<'a>(
+    name: &str,
+    span: &Span,
+    generic: bool,
+    candidates: impl IntoIterator<Item = &'a Name>,
+) -> String {
+    let kind = if generic {
+        "ambiguous generic call"
+    } else {
+        "ambiguous call"
+    };
+    let mut error = span.error(format!("{kind} to '{name}'"));
+    for candidate in candidates {
+        error.push_str(&format!(
+            "\ncandidate '{}' at {}:{}:{}",
+            candidate.text, candidate.span.file, candidate.span.line, candidate.span.column
+        ));
+    }
+    error
+}
 impl Compiler {
     pub fn with_optimization(enabled: bool) -> Self {
         Self {
@@ -153,7 +184,7 @@ impl Compiler {
         }
         let mut hir = {
             let _stage = enter(Stage::Hir);
-            self.build_hir()
+            self.build_hir()?
         };
         let lir = self.analyze_program(&mut hir)?;
         if matches!(emit, crate::backend::Emit::Hir) {
@@ -163,16 +194,33 @@ impl Compiler {
             return Ok(format!("{lir:#?}\n"));
         }
         let _stage = enter(Stage::Cpp);
-        Ok(crate::backend::emit_program(
-            &lir,
-            &self.cpp_context(),
-            !self.no_optimization,
-        ))
+        let output = crate::backend::emit_program(&lir, &self.cpp_context(), !self.no_optimization);
+        Ok(self.finalize_native_references(&output))
     }
     fn compile_function(&mut self, index: usize) -> Result<(), String> {
-        let context = FunctionContext::function(index, self.functions[index].result.clone());
+        if self.functions[index].checked.is_some() {
+            return Ok(());
+        }
+        self.prepare_generic_capture_source(index);
+        let capture = self
+            .environments
+            .locals
+            .get(&index)
+            .and_then(|local| local.available.clone());
+        if let Some(available) = &capture {
+            self.begin_named_capture(index, available.clone());
+        }
+        let mut context = FunctionContext::function(index, self.functions[index].result.clone());
+        context.declaration_scope = self.declaration_scopes.child(self.functions[index].scope);
         let (result, _) =
             self.with_function_context(context, |compiler| compiler.check_function_body(index));
+        if capture.is_some() {
+            let captures = self.finish_named_capture(index);
+            self.environments.locals.get_mut(&index).unwrap().captures = captures;
+            if result.is_ok() {
+                self.finish_generic_snapshots(index)?;
+            }
+        }
         result
     }
     fn check_function_body(&mut self, index: usize) -> Result<(), String> {
@@ -191,11 +239,12 @@ impl Compiler {
         let Stmt::Block(statements, tail) = body.as_ref() else {
             unreachable!()
         };
-        for statement in statements {
+        let statements = self.prepare_block_declarations(statements)?;
+        for statement in &statements {
             self.statement(statement)?;
         }
         if let Some(tail) = tail {
-            self.statement(&Stmt::Expr((**tail).clone()))?;
+            self.statement(&Stmt::Expr(self.scoped_expression(tail)))?;
         }
         if f.result != "Unit" && !self.context.diverged {
             return Err(f
@@ -256,10 +305,27 @@ impl Compiler {
         self.lookup_variable(n, false)?
             .ok_or_else(|| n.span.error(format!("unknown variable '{}'", n.text)))
     }
-    fn declare(&mut self, n: &Name, ty: String, value: Option<Value>) -> Result<(), String> {
+    fn check_variable_name(&self, n: &Name) -> Result<(), String> {
+        if self
+            .functions
+            .iter()
+            .any(|f| f.scope == self.context.declaration_scope && f.name.text == n.text)
+            || self
+                .generic_functions
+                .iter()
+                .any(|f| f.scope == self.context.declaration_scope && f.name.text == n.text)
+        {
+            return Err(n
+                .span
+                .error(format!("variable conflicts with function '{}'", n.text)));
+        }
         if self.context.scopes.last().unwrap().contains_key(&n.text) {
             return Err(n.span.error(format!("duplicate variable '{}'", n.text)));
         }
+        Ok(())
+    }
+    fn declare(&mut self, n: &Name, ty: String, value: Option<Value>) -> Result<(), String> {
+        self.check_variable_name(n)?;
         if let Some(v) = &value {
             self.same(&ty, &v.ty, &n.span)?;
         }
@@ -282,6 +348,7 @@ impl Compiler {
         self.context.scopes.last_mut().unwrap().insert(
             n.text.clone(),
             Variable {
+                scope: self.context.declaration_scope,
                 id: cpp,
                 ty,
                 initialized: value.is_some(),
@@ -295,7 +362,11 @@ impl Compiler {
         if a == b || a == crate::ir::hir::DIVERGED || b == crate::ir::hir::DIVERGED {
             Ok(())
         } else {
-            Err(s.error(format!("type mismatch: expected {a}, found {b}")))
+            Err(s.error(format!(
+                "type mismatch: expected {}, found {}",
+                self.diagnostic_type(a),
+                self.diagnostic_type(b)
+            )))
         }
     }
     fn select(
@@ -305,20 +376,29 @@ impl Compiler {
         expected: Option<&str>,
         s: &Span,
     ) -> Result<Option<usize>, String> {
+        let arguments = args.iter().map(|v| v.ty.clone()).collect::<Vec<_>>();
+        let scopes = self.function_scopes(name, &arguments);
+        let lookup_name = self.source_function_name(name);
         let ids: Vec<_> = self
             .functions
             .iter()
             .enumerate()
             .filter(|(index, f)| {
                 !self.generic_calls.contains_key(index)
-                    && f.name.text == name
-                    && f.params == args.iter().map(|v| v.ty.clone()).collect::<Vec<_>>()
+                    && scopes.contains(&f.scope)
+                    && f.name.text == lookup_name
+                    && f.params == arguments
                     && (!return_selected(name) || expected.is_none_or(|t| f.result == t))
             })
             .map(|(i, _)| i)
             .collect();
         if ids.len() > 1 {
-            return Err(s.error(format!("ambiguous call to '{name}'")));
+            return Err(ambiguous_call(
+                name,
+                s,
+                false,
+                ids.iter().map(|id| &self.functions[*id].name),
+            ));
         }
         Ok(ids.first().copied())
     }
@@ -374,9 +454,10 @@ impl Compiler {
             .resolve_callable(name, &args, expected, s)?
             .ok_or_else(|| {
                 s.error(format!(
-                    "no matching function '{name}' for ({})",
+                    "no matching function '{}' for ({})",
+                    self.source_function_name(name),
                     args.iter()
-                        .map(|v| v.ty.as_str())
+                        .map(|v| self.diagnostic_type(&v.ty))
                         .collect::<Vec<_>>()
                         .join(", ")
                 ))
@@ -388,6 +469,7 @@ impl Compiler {
             ty: f.result.clone(),
         };
         self.context.pending_temps.push(result.id.clone());
+        self.record_environment_site(result.id.clone(), s);
         self.context.body.push(Instruction::Call(Call {
             function: i,
             args,
@@ -530,10 +612,7 @@ impl Compiler {
             Stmt::GenericExternType(n, ..)
             | Stmt::GenericExternFunction(n, ..)
             | Stmt::Type(n, _)
-            | Stmt::Struct(n, ..)
-            | Stmt::Enum(n, ..)
             | Stmt::Function(n, ..)
-            | Stmt::UserFunction(n, ..)
             | Stmt::Symbol(n, _) => {
                 if self.context.return_type.is_some() || self.context.scopes.len() != 1 {
                     return Err(n
@@ -541,6 +620,10 @@ impl Compiler {
                         .error("type and function declarations are currently top-level only"));
                 }
             }
+            Stmt::UserFunction(name, parameters, ..) => {
+                self.declare_local_function(name, !parameters.is_empty())?;
+            }
+            Stmt::Struct(..) | Stmt::Enum(..) => {}
             Stmt::Return(span, value) => {
                 let declared = self
                     .context
@@ -849,14 +932,17 @@ impl Compiler {
             }
             Stmt::Block(statements, tail) => {
                 self.context.scopes.push(BTreeMap::new());
-                let body = self.capture(|c| {
-                    for statement in statements {
-                        c.statement(statement)?;
-                    }
-                    if let Some(tail) = tail {
-                        c.statement(&Stmt::Expr((**tail).clone()))?;
-                    }
-                    Ok(())
+                let body = self.with_declaration_scope(|c| {
+                    c.capture(|c| {
+                        let statements = c.prepare_block_declarations(statements)?;
+                        for statement in &statements {
+                            c.statement(statement)?;
+                        }
+                        if let Some(tail) = tail {
+                            c.statement(&Stmt::Expr(c.scoped_expression(tail)))?;
+                        }
+                        Ok(())
+                    })
                 })?;
                 self.context.scopes.pop();
                 self.context.body.push(Instruction::Scope(body));
@@ -1069,10 +1155,7 @@ impl Compiler {
                 ))
             }
             ExprKind::Call(n, args) => {
-                if self
-                    .lookup_variable(n, true)?
-                    .is_some_and(|v| self.callables.contains_key(&v.ty))
-                {
+                if self.lookup_variable(n, false)?.is_some() {
                     let callee = self.expr(
                         &Expr {
                             kind: ExprKind::Var(n.clone()),
@@ -1080,7 +1163,7 @@ impl Compiler {
                         },
                         None,
                     )?;
-                    return self.invoke_arguments(callee, args, &e.span);
+                    return self.invoke_arguments(callee, args, expected, &e.span);
                 }
                 let mut values = vec![];
                 for arg in args {

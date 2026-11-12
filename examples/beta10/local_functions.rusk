@@ -1,0 +1,70 @@
+//! 名前付きローカル関数の捕捉、再帰、環境のコピー。
+
+{
+    let graph: Vec<Vec<Int>> := [[1, 2], [2], []];
+    let visited := [false; 3];
+    let count := 0;
+    fn dfs(v: Int) {
+        if visited[v] {
+            return;
+        }
+        visited[v] = true;
+        count += 1;
+        for u in graph[v] {
+            dfs(u);
+        }
+    }
+    dfs(0);
+    wt count;
+}
+
+let factory := (start: Int) => {
+    let count := start;
+    fn next() -> Int {
+        count += 1;
+        return count;
+    }
+    next
+};
+let a := factory(0);
+let b := factory(100);
+wt a(), b(), a();
+let detached = a;
+wt detached(), a();
+
+let walk := {
+    let count := 0;
+    fn even(n: Int) -> Int {
+        count += 1;
+        if n == 0 {
+            return count;
+        }
+        return odd(n - 1);
+    }
+    fn odd(n: Int) -> Int {
+        count += 1;
+        if n == 0 {
+            return count;
+        }
+        return even(n - 1);
+    }
+    even
+};
+wt walk(3);
+let other = walk;
+wt other(0), walk(0);
+
+let text := "ab";
+{
+    let read := {
+        let first := text[0];
+        fn read_first() -> Char {
+            return first;
+        }
+        read_first
+    };
+    wt read();
+    read() = 'Z';
+}
+text.push_back('!');
+wt text;

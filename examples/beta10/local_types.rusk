@@ -1,0 +1,79 @@
+//! ローカル型と、型の定義スコープにある操作。
+fn extract<T>(value: T) -> Int {
+    return item_value(value);
+}
+
+let item := {
+    struct Item {
+        value: Int;
+    }
+    fn item_value(value: Item) -> Int {
+        return value.value;
+    }
+    Item {
+        value: 7
+    }
+};
+wt item_value(item), extract(item);
+
+{
+    struct Box<T> {
+        value: T;
+    }
+    fn Box<T>(value: T) -> Box<T> {
+        return Box::<T> {
+            value: value
+        };
+    }
+    enum Choice<T> {
+        Some(T),
+        Empty
+    }
+    let held := Choice::Some(Box(3));
+    let independent = held;
+    wt match independent {
+        Choice::Some(value) => value.value,
+        Choice::Empty => 0,
+    };
+}
+
+let make := (offset: Int) => {
+    struct Item {
+        value: Int;
+    }
+    fn adjusted(value: Item) -> Int {
+        offset += 1;
+        return value.value + offset;
+    }(
+        Item {
+            value: 1
+        },
+        adjusted
+    )
+};
+let a := make(10);
+let b := make(20);
+wt a[1](b[0]), b[1](a[0]);
+let independent = a;
+wt independent[1](independent[0]), a[1](a[0]);
+
+fn compare_fields(a: Int, b: Int) -> Ordering {
+    return a <=> b;
+} {
+    struct Item {
+        value: Int;
+    }
+    fn __cmp__(a: Item, b: Item) -> Ordering {
+        return compare_fields(a.value, b.value);
+    }
+    let values := [
+        Item {
+            value: 2
+        },
+        Item {
+            value: 1
+        }
+    ];
+    values.sort();
+    wt values.map((value: Item) => value.value).to_vec();
+}

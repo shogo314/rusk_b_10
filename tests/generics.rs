@@ -56,7 +56,7 @@ fn generic_specialization_failures_have_source_context() {
     for source in [
         "fn f<T,T>(value:T) {}",
         "fn f<T>(a:T,a:T) {}",
-        "fn f<T>(a:T) {} fn f<U>(b:U) {}",
+        "fn f<T>(a:T) {} fn f<U>(b:U) {} f(1);",
         "struct Pair<T,T> { value:T; }",
         "struct Box<T> { value:T; } let x:Box<Int,Str>;",
         "struct Box<T> { value:T; } let x:Vec<Box<Missing>>;",

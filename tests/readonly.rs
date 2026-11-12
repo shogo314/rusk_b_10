@@ -181,8 +181,8 @@ fn conflicts_external_contracts_and_overloads_are_checked() {
             "conflicting access modifiers",
         ),
         (
-            "fn f(readonly x:Int){}fn f(mutable x:Int){}",
-            "duplicate function",
+            "fn f(readonly x:Int){}fn f(mutable x:Int){}f(1);",
+            "ambiguous call",
         ),
     ] {
         let out = Case::new(source).compile();

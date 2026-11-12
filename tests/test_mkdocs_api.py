@@ -109,6 +109,34 @@ extern fn Int(x: Int) -> Int
         self.assertEqual(rendered.count('class="rusk-api-file"'), 1)
         self.assertEqual(rendered.count('</section>'), 3)
 
+    def test_local_scope_paths_remain_searchable_entries(self):
+        source = """# APIリファレンス
+
+## `user.rusk`
+
+### `fn outer<T>(x: T) -> Unit / block 1 / Item` { #api-user-local-type }
+
+```text
+struct Item
+```
+
+### `fn outer<T>(x: T) -> Unit / lambda 1 / helper` { #api-user-local-helper }
+
+説明。
+"""
+        rendered = markdown.markdown(
+            HOOK.searchable_reference(source),
+            extensions=['md_in_html', 'fenced_code', 'attr_list', 'toc'],
+        )
+        parsed = Sections()
+        parsed.feed(rendered)
+        self.assertEqual(parsed.entries, 2)
+        self.assertEqual(parsed.forms, 1)
+        self.assertEqual(parsed.stack, [])
+        for anchor in ('api-user-local-type', 'api-user-local-helper'):
+            self.assertEqual(parsed.headings[anchor], ('rusk-api-file', 'rusk-api-entry'))
+
+
 
 if __name__ == '__main__':
     unittest.main()

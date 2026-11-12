@@ -12,7 +12,16 @@ impl Compiler {
                         .map(|(n, t)| (n.text.clone(), t.text.clone()))
                         .collect()
                 };
-                let kind = if let Some(c) = self.callables.get(name) {
+                let kind = if let Some(family) = self.families.get(name) {
+                    Type::FunctionFamily {
+                        fields: fields(),
+                        functions: family
+                            .entries
+                            .values()
+                            .map(|entry| entry.function)
+                            .collect(),
+                    }
+                } else if let Some(c) = self.callables.get(name) {
                     Type::Callable {
                         fields: fields(),
                         function: c.function,

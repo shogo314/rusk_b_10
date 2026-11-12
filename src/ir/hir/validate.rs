@@ -293,6 +293,20 @@ impl Program {
                         base.ty(t)?;
                     }
                 }
+                Type::FunctionFamily { fields, functions } => {
+                    for (_, ty) in fields {
+                        base.ty(ty)?;
+                    }
+                    for function in functions {
+                        let f = self
+                            .functions
+                            .get(*function)
+                            .ok_or("IR family entry is missing")?;
+                        if f.params.first() != Some(name) {
+                            return Err("IR family receiver type mismatch".into());
+                        }
+                    }
+                }
                 Type::Callable {
                     fields,
                     function,

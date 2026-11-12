@@ -4,6 +4,7 @@ use crate::frontend::{
 };
 use serde_json::{Value, json};
 use std::collections::BTreeMap;
+mod walk;
 
 #[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 pub(super) enum Origin {
@@ -31,6 +32,7 @@ pub(super) struct Entry {
     pub kind: &'static str,
     pub signature: String,
     pub owner: Option<String>,
+    pub scope: Vec<String>,
     pub description: Option<String>,
     pub position: Span,
     pub id: String,
@@ -41,10 +43,15 @@ pub(super) struct Entry {
 }
 impl Entry {
     pub fn qualified_name(&self) -> String {
-        match &self.owner {
+        let name = match &self.owner {
             Some(owner) if self.kind == "variant" => format!("{owner}::{}", self.name),
             Some(owner) => format!("{owner}.{}", self.name),
             None => self.name.clone(),
+        };
+        if self.scope.is_empty() {
+            name
+        } else {
+            format!("{} / {name}", self.scope.join(" / "))
         }
     }
     pub fn json(&self) -> Value {
@@ -55,6 +62,8 @@ impl Entry {
             "kind": self.kind,
             "signature": self.signature,
             "owner": self.owner,
+            "scope": self.scope,
+            "qualified_name": self.qualified_name(),
             "description": self.description,
             "file": self.position.file,
             "line": self.position.line,
@@ -142,67 +151,7 @@ impl Catalog {
             };
             self.entries.push(entry);
         };
-        for statement in source.statements {
-            match statement {
-                Stmt::Struct(name, generics, fields) => {
-                    let ty = name.text.clone();
-                    add(type_entry(origin, name, "struct", generics));
-                    for (name, field) in fields {
-                        let signature = format!("{}: {}", name.text, type_text(&field.text));
-                        add(entry(origin, name, "field", signature, Some(ty.clone())));
-                    }
-                }
-                Stmt::Enum(name, generics, variants) => {
-                    let ty = name.text.clone();
-                    add(type_entry(origin, name, "enum", generics));
-                    for (name, payload) in variants {
-                        let signature = if payload.is_empty() {
-                            name.text.clone()
-                        } else {
-                            format!(
-                                "{}({})",
-                                name.text,
-                                payload
-                                    .iter()
-                                    .map(|ty| type_text(&ty.text))
-                                    .collect::<Vec<_>>()
-                                    .join(", ")
-                            )
-                        };
-                        add(entry(origin, name, "variant", signature, Some(ty.clone())));
-                    }
-                }
-                Stmt::Type(name, _) => add(type_entry(origin, name, "extern type", vec![])),
-                Stmt::GenericExternType(name, generics, _) => {
-                    add(type_entry(origin, name, "extern type", generics));
-                }
-                Stmt::Symbol(name, _) => {
-                    let signature = format!("extern symbol {}", name.text);
-                    add(entry(origin, name, "extern symbol", signature, None));
-                }
-                Stmt::UserFunction(name, generics, params, result, _) => {
-                    add(function(origin, name, "function", generics, params, result));
-                }
-                Stmt::Function(name, params, result, _) => {
-                    add(function(
-                        origin,
-                        name,
-                        "extern function",
-                        vec![],
-                        params,
-                        result,
-                    ));
-                }
-                Stmt::GenericExternFunction(name, generics, params, result, properties) => {
-                    let mut entry =
-                        function(origin, name, "extern function", generics, params, result);
-                    entry.internal |=
-                        origin == Origin::Standard && properties.contains_key("derive");
-                    add(entry);
-                }
-                _ => {}
-            }
-        }
+        walk::Declarations::new(origin, &mut add).statements(&source.statements);
         self.files
             .extend(source.files.into_iter().map(|(path, docs)| File {
                 origin,
@@ -242,6 +191,7 @@ fn entry(
         kind,
         signature,
         owner,
+        scope: vec![],
         description: None,
         id: String::new(),
         type_parameters: vec![],
@@ -329,10 +279,46 @@ fn identifier(entry: &Entry) -> String {
         entry.kind,
         entry.owner.as_deref().unwrap_or_default(),
         entry.signature.as_str(),
-    ] {
+    ]
+    .into_iter()
+    .chain(entry.scope.iter().map(String::as_str))
+    {
         for byte in part.bytes().chain([0]) {
             hash = (hash ^ u64::from(byte)).wrapping_mul(0x100000001b3);
         }
     }
     format!("api-{}-{hash:016x}", entry.origin.label())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    #[test]
+    fn standard_local_declarations_are_internal_but_user_locals_remain_visible() {
+        let files = [(
+            "api.rusk",
+            "fn public(){fn helper(){}struct Local{value:Int;}}",
+        )];
+        for origin in [Origin::Standard, Origin::User] {
+            let source = crate::frontend::source::documented_embedded("api.rusk", &files).unwrap();
+            let mut catalog = Catalog::default();
+            catalog.extend(origin, source);
+            assert_eq!(catalog.entries.len(), 4);
+            let public = catalog
+                .entries
+                .iter()
+                .find(|entry| entry.name == "public")
+                .unwrap();
+            assert!(!public.internal);
+            assert!(public.scope.is_empty());
+            for local in catalog
+                .entries
+                .iter()
+                .filter(|entry| entry.name != "public")
+            {
+                assert!(!local.scope.is_empty());
+                assert_eq!(local.internal, origin == Origin::Standard);
+            }
+        }
+    }
 }

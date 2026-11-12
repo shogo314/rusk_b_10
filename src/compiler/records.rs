@@ -69,6 +69,9 @@ impl Compiler {
                 );
             }
             self.functions.push(Function {
+                // Derived operations must not introduce a lexical overload
+                // family that hides unrelated scalar operations in this block.
+                scope: scopes::ScopeId::ROOT,
                 name: Name {
                     text: name.into(),
                     span: record.name.span.clone(),
@@ -87,7 +90,11 @@ impl Compiler {
         Ok(())
     }
 
-    fn check_record_cycle(&self, name: &Name, path: &mut Vec<String>) -> Result<(), String> {
+    pub(super) fn check_record_cycle(
+        &self,
+        name: &Name,
+        path: &mut Vec<String>,
+    ) -> Result<(), String> {
         let Some(record) = self.records.get(&name.text) else {
             if let Some((_, args)) = super::tuples::type_parts(&name.text) {
                 for arg in args {

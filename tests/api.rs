@@ -225,3 +225,180 @@ fn documented_standard_api_examples_run() {
     }
     assert!(tested >= 2);
 }
+
+#[test]
+fn local_declarations_keep_distinct_scopes_comments_and_stable_formatted_anchors() {
+    let case = Case::new(
+        r#"
+/// A root overload.
+fn outer<T>(input:T) {
+    /// A local helper.
+    fn helper(value:T)->T{return value;}
+    {
+        /// The first local type.
+        struct Item{
+            /// The stored value.
+            value:Missing;
+        }
+    }
+    {struct Item{value:Int;}}
+    let factory:=()=>{
+        /// The lambda helper.
+        fn helper(value:Int)->Int{return value;}
+        enum Choice{
+            /// A local variant.
+            Some(Int),None
+        }
+        0
+    };
+}
+fn outer(input:Int){fn helper(value:Int)->Int{return value;}}
+fn duplicate(){fn helper(){}}
+fn duplicate(){fn helper(){}}
+"#,
+    );
+    let args = ["doc", "--file", "main.rusk", "--json"];
+    let mut before = json(&case, &args);
+    let entries = before["entries"].as_array().unwrap();
+    let ids = entries
+        .iter()
+        .map(|entry| entry["id"].as_str().unwrap())
+        .collect::<std::collections::BTreeSet<_>>();
+    assert_eq!(ids.len(), entries.len());
+    let item = entries
+        .iter()
+        .filter(|entry| entry["name"] == "Item")
+        .collect::<Vec<_>>();
+    assert_eq!(item.len(), 2);
+    assert_eq!(
+        item[0]["scope"],
+        serde_json::json!(["fn outer<T>(input: T) -> Unit", "block 1"])
+    );
+    assert_eq!(item[1]["scope"][1], "block 2");
+    assert_eq!(item[0]["description"], "The first local type.");
+    let field = entries
+        .iter()
+        .find(|entry| entry["description"] == "The stored value.")
+        .unwrap();
+    assert_eq!(field["owner"], "Item");
+    assert_eq!(field["scope"], item[0]["scope"]);
+    assert!(
+        field["qualified_name"]
+            .as_str()
+            .unwrap()
+            .ends_with(" / Item.value")
+    );
+    let lambda = entries
+        .iter()
+        .find(|entry| entry["description"] == "The lambda helper.")
+        .unwrap();
+    assert_eq!(lambda["scope"][1], "lambda 1");
+    let variant = entries
+        .iter()
+        .find(|entry| entry["name"] == "Some")
+        .unwrap();
+    assert!(
+        variant["qualified_name"]
+            .as_str()
+            .unwrap()
+            .ends_with("lambda 1 / Choice::Some")
+    );
+    assert_eq!(variant["description"], "A local variant.");
+    let duplicates = entries
+        .iter()
+        .filter(|entry| {
+            entry["name"] == "helper"
+                && entry["scope"][0]
+                    .as_str()
+                    .is_some_and(|name| name.starts_with("fn duplicate"))
+        })
+        .collect::<Vec<_>>();
+    assert_eq!(duplicates.len(), 2);
+    assert_ne!(duplicates[0]["scope"], duplicates[1]["scope"]);
+    let matches = json(
+        &case,
+        &["search", "lambda 1", "--file", "main.rusk", "--json"],
+    );
+    assert!(
+        matches["entries"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|entry| entry["name"] == "helper")
+    );
+    let markdown = rusk(&case, &["doc", "--file", "main.rusk"]);
+    for entry in entries {
+        assert!(markdown.contains(&format!("{{ #{} }}", entry["id"].as_str().unwrap())));
+    }
+    assert!(markdown.contains("fn outer<T>(input: T) -> Unit / block 1 / Item"));
+    rusk(&case, &["fmt", "--write", "main.rusk"]);
+    let mut after = json(&case, &args);
+    for catalog in [&mut before, &mut after] {
+        for entry in catalog["entries"].as_array_mut().unwrap() {
+            let fields = entry.as_object_mut().unwrap();
+            fields.remove("line");
+            fields.remove("column");
+        }
+    }
+    assert_eq!(before, after);
+}
+
+#[test]
+fn declaration_search_reaches_conditions_loops_match_guards_and_expression_arguments() {
+    let case = Case::new(
+        r#"
+fn outer(){
+    if ({fn condition(){}true}) {fn yes(){}} else {fn no(){}}
+    while ({fn while_condition(){}false}) {fn while_body(){}} else {fn while_else(){}}
+    for value in ({fn source(){}[1]}) {fn for_body(){}} else {fn for_else(){}}
+    let result:=match value {
+        Some(x) if {fn guard(){}true}=>{fn selected(){}0},
+        _=>{fn otherwise(){}0},
+    };
+    call({fn argument(){}0},()=>{fn callback(){}0});
+    return {fn returned(){}0};
+}
+"#,
+    );
+    let catalog = json(&case, &["doc", "--file", "main.rusk", "--json"]);
+    let entries = catalog["entries"].as_array().unwrap();
+    let expected = [
+        "outer",
+        "condition",
+        "yes",
+        "no",
+        "while_condition",
+        "while_body",
+        "while_else",
+        "source",
+        "for_body",
+        "for_else",
+        "guard",
+        "selected",
+        "otherwise",
+        "argument",
+        "callback",
+        "returned",
+    ];
+    let names = entries
+        .iter()
+        .map(|entry| entry["name"].as_str().unwrap())
+        .collect::<std::collections::BTreeSet<_>>();
+    assert_eq!(names, expected.into_iter().collect());
+    let guard = entries
+        .iter()
+        .find(|entry| entry["name"] == "guard")
+        .unwrap();
+    assert!(
+        guard["qualified_name"]
+            .as_str()
+            .unwrap()
+            .contains("match 1 / arm 1 / block 1 / guard")
+    );
+    let selected = entries
+        .iter()
+        .find(|entry| entry["name"] == "selected")
+        .unwrap();
+    assert_ne!(guard["scope"], selected["scope"]);
+    assert!(!case.0.join("a.cpp").exists());
+}

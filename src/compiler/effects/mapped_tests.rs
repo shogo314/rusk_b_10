@@ -275,3 +275,41 @@ destination.value[0]=7;source:=[];wt destination.value,source.len();
     }
     std::fs::remove_dir_all(dir).unwrap();
 }
+
+#[test]
+fn mapped_named_operations_route_hidden_captures_to_returned_aliases() {
+    let standard = r#"
+extern fn outer<T>(value:T)->Int{effects:"read_fresh",code:"@{call child(T)->Int via (0) into return}",}
+extern fn __assign__(a:Int,b:Int){cpp_name:"assign",code:"unused",effects:"write_first",}
+"#;
+    let body = r#"
+struct Item{unused:Int;}
+fn child(item:Item)->Int{return captured;}
+let result:=outer(Item{unused:0});
+"#;
+    let hir = compile(
+        standard,
+        &format!("fn scoped(noescape captured:Int){{{body}}}scoped(1);"),
+    )
+    .unwrap();
+    let summary = section(&hir, "outer");
+    assert!(summary.contains("source: NativeContract"), "{hir}");
+    assert!(
+        summary.contains("ReturnAlias") && summary.contains("parameter: 1"),
+        "{hir}"
+    );
+    for (source, annotation) in [
+        (
+            format!("fn scoped(noescape captured:Int)->Int{{{body}return result;}}scoped(1);"),
+            "noescape",
+        ),
+        (
+            format!("fn scoped(readonly captured:Int){{{body}result=2;}}scoped(1);"),
+            "readonly",
+        ),
+    ] {
+        let error = compile(standard, &source).unwrap_err();
+        assert!(error.contains(annotation), "{error}");
+        assert!(!error.contains("internal compiler error"), "{error}");
+    }
+}

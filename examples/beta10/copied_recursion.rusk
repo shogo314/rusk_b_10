@@ -1,0 +1,39 @@
+//! コピーした環境から自己再帰・相互再帰しても元の環境へ戻らない。
+let descend := {
+    let count := 0;
+    fn visit<T>(value: T, depth: Int) -> Int {
+        count += 1;
+        if depth == 0 {
+            return count;
+        }
+        count := 100;
+        let recurse := visit;
+        return recurse(value, depth - 1);
+    }
+    visit
+};
+let isolated = descend;
+wt isolated(0, 2), descend(0, 0);
+
+let alternate := {
+    let a := 0;
+    let b := 100;
+    fn even(depth: Int) -> Int {
+        a += 1;
+        if depth == 0 {
+            return a;
+        }
+        return odd(depth - 1);
+    }
+    fn odd(depth: Int) -> Int {
+        b += 1;
+        if depth == 0 {
+            return b;
+        }
+        return even(depth - 1);
+    }
+    even
+};
+wt alternate(2);
+let separate = alternate;
+wt separate(2), alternate(2);

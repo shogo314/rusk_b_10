@@ -296,6 +296,7 @@ fn backend_trust_uses_origin_instead_of_spelling() {
         (Origin::StandardLibrary, "renamed.rusk"),
     ] {
         compiler.functions.push(Function {
+            scope: scopes::ScopeId::ROOT,
             name: Name {
                 text: "unrelated".into(),
                 span: Span {

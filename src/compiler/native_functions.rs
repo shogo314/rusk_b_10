@@ -17,6 +17,7 @@ impl Compiler {
         let cpp = format!("rusk_algorithm_{index}");
         let code = code(&cpp);
         self.functions.push(Function {
+            scope: scopes::ScopeId::ROOT,
             name: Name {
                 text: name.into(),
                 span: span.clone(),

@@ -80,7 +80,10 @@ fn function_examples_keep_argument_and_capture_sharing() {
             ("", "25\n"),
             ("", "9 8 3\n"),
             ("", "7 abc\n"),
+            ("", "1 2 2\n"),
             ("", "22\n22\n"),
+            ("", "1 2 1\n"),
+            ("", "3 abc\n2 4\n"),
         ],
     );
 }
@@ -126,6 +129,7 @@ fn record_examples_run_without_undeclared_example_types() {
             ("", "1 one\n2 two\n"),
             ("", "2 1\n1 2\n"),
             ("", "1\n"),
+            ("", "7\n"),
             ("3\n", "Yes\n"),
         ],
     );

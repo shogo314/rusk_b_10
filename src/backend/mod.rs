@@ -1,6 +1,7 @@
 //! Target-specific representation selection and C++ emission from LIR.
 mod cpp;
 mod intrinsics;
+mod native_environments;
 mod owned_aliases;
 mod program;
 mod scalar_aliases;
@@ -12,6 +13,8 @@ pub(crate) struct FunctionInfo {
     pub unit_object: bool,
     pub trusted: bool,
     pub lowering: Option<crate::native::lowering::Lowering>,
+    pub captures: Vec<(usize, usize)>,
+    pub native_entry: Option<String>,
 }
 pub(crate) use cpp::emit as cpp;
 

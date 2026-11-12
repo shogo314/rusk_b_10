@@ -9,6 +9,7 @@ pub(super) struct GenericRecord {
 }
 #[derive(Clone)]
 pub(super) struct GenericFunction {
+    pub scope: scopes::ScopeId,
     pub name: Name,
     pub parameters: Vec<Name>,
     pub arguments: Vec<(DeclaredName, Name)>,
@@ -50,6 +51,16 @@ struct SelectedGeneric {
     bindings: BTreeMap<String, String>,
 }
 
+/// Signature-only inference and actual calls must use the same ranking.
+fn best_candidates<T>(candidates: Vec<(usize, T)>) -> Vec<T> {
+    let best = candidates.iter().map(|(rank, _)| *rank).min();
+    candidates
+        .into_iter()
+        .filter(|(rank, _)| Some(*rank) == best)
+        .map(|(_, candidate)| candidate)
+        .collect()
+}
+
 struct QueryBudget {
     remaining: usize,
 }
@@ -67,6 +78,19 @@ impl QueryBudget {
 }
 
 impl GenericFunction {
+    /// Count argument positions, not distinct type parameters or occurrences.
+    /// Explicit type arguments do not change a declaration's rank.
+    fn generic_argument_count(&self) -> usize {
+        self.arguments
+            .iter()
+            .filter(|(_, ty)| {
+                ty.text
+                    .split(|c: char| !c.is_ascii_alphanumeric() && c != '_')
+                    .any(|word| self.parameters.iter().any(|p| p.text == word))
+            })
+            .count()
+    }
+
     fn infer_requirements(
         &self,
         compiler: &Compiler,
@@ -78,6 +102,7 @@ impl GenericFunction {
         budget.charge(depth)?;
         // A callable's nominal type is already known from the argument. Its
         // signature can fill result/argument parameters without erasing captures.
+        let mut use_family_hints = false;
         loop {
             let before = bindings.len();
             for requirement in &self.callbacks {
@@ -93,18 +118,58 @@ impl GenericFunction {
                 let Some(callback) = compiler.callables.get(&ty) else {
                     return Ok(false);
                 };
-                if callback.parameters.len() != requirement.parameters.len()
+                let (parameters, result) = if let Some(family) = compiler.families.get(&ty) {
+                    let parameters = if requirement
+                        .parameters
+                        .iter()
+                        .all(|p| bound(p, &self.parameters, bindings))
+                    {
+                        requirement
+                            .parameters
+                            .iter()
+                            .map(|p| substitute(p, bindings))
+                            .collect::<Vec<_>>()
+                    } else if family.generic.is_empty() && use_family_hints {
+                        use_family_hints = false;
+                        let mut signatures = family
+                            .concrete
+                            .iter()
+                            .map(|&id| compiler.functions[id].params.clone())
+                            .collect::<BTreeSet<_>>();
+                        if signatures.len() != 1 {
+                            continue;
+                        }
+                        signatures.pop_first().unwrap()
+                    } else {
+                        continue;
+                    };
+                    let result_context = bound(&requirement.result, &self.parameters, bindings)
+                        .then(|| substitute(&requirement.result, bindings));
+                    let Some(result) = compiler.signature_result_with_context(
+                        &family.name.text,
+                        &parameters,
+                        family.origin,
+                        result_context.as_deref(),
+                        depth + 1,
+                        budget,
+                    )?
+                    else {
+                        if result_context.is_none() && expected.is_some() {
+                            continue;
+                        }
+                        return Ok(false);
+                    };
+                    (parameters, result)
+                } else {
+                    (callback.parameters.clone(), callback.result.clone())
+                };
+                if parameters.len() != requirement.parameters.len()
                     || !requirement
                         .parameters
                         .iter()
-                        .zip(&callback.parameters)
+                        .zip(&parameters)
                         .all(|(pattern, actual)| unify(pattern, actual, &self.parameters, bindings))
-                    || !unify(
-                        &requirement.result,
-                        &callback.result,
-                        &self.parameters,
-                        bindings,
-                    )
+                    || !unify(&requirement.result, &result, &self.parameters, bindings)
                 {
                     return Ok(false);
                 }
@@ -130,13 +195,17 @@ impl GenericFunction {
                     .map(|a| substitute(a, bindings))
                     .collect::<Vec<_>>();
                 if let Some(result) =
-                    compiler.signature_result(&name, &arguments, depth + 1, budget)?
+                    compiler.signature_result(&name, &arguments, self.scope, depth + 1, budget)?
                     && !unify(&requirement.result, &result, &self.parameters, bindings)
                 {
                     return Ok(false);
                 }
             }
             if bindings.len() == before {
+                if !use_family_hints {
+                    use_family_hints = true;
+                    continue;
+                }
                 return Ok(true);
             }
         }
@@ -310,24 +379,8 @@ impl Compiler {
                 return Err(name.span.error("duplicate parameter"));
             }
         }
-        let normalized = |f: &GenericFunction| {
-            let bindings = f
-                .parameters
-                .iter()
-                .enumerate()
-                .map(|(i, p)| (p.text.clone(), format!("${i}")))
-                .collect();
-            f.arguments
-                .iter()
-                .map(|(_, ty)| substitute(&ty.text, &bindings))
-                .collect::<Vec<_>>()
-        };
-        if self.generic_functions.iter().any(|f| {
-            f.name.text == definition.name.text
-                && f.parameters.len() == definition.parameters.len()
-                && normalized(f) == normalized(&definition)
-        }) {
-            return Err(definition.name.span.error("duplicate generic function"));
+        if definition.scope != scopes::ScopeId::ROOT && definition.body.is_some() {
+            self.register_generic_environment(self.generic_functions.len());
         }
         self.generic_functions.push(definition);
         Ok(())
@@ -398,30 +451,46 @@ impl Compiler {
         &self,
         name: &str,
         arguments: &[String],
+        origin: scopes::ScopeId,
+        depth: usize,
+        budget: &mut QueryBudget,
+    ) -> Result<Option<String>, ()> {
+        self.signature_result_with_context(name, arguments, origin, None, depth, budget)
+    }
+    fn signature_result_with_context(
+        &self,
+        name: &str,
+        arguments: &[String],
+        origin: scopes::ScopeId,
+        expected: Option<&str>,
         depth: usize,
         budget: &mut QueryBudget,
     ) -> Result<Option<String>, ()> {
         budget.charge(depth)?;
         let base = type_parts(name).map_or(name, |(base, _)| base);
-        if base == name {
-            let concrete = self
-                .functions
-                .iter()
-                .enumerate()
-                .filter(|(i, f)| {
-                    !self.generic_calls.contains_key(i)
-                        && f.name.text == name
-                        && f.params == arguments
-                })
-                .map(|(_, f)| &f.result)
-                .collect::<Vec<_>>();
-            if !concrete.is_empty() {
-                return Ok((concrete.len() == 1).then(|| concrete[0].clone()));
-            }
-        }
+        let scopes = self.function_scopes_at(name, arguments, origin);
+        let lookup_name = self.source_function_name(name);
+        let lookup_base = self.source_function_name(base);
         let mut results = vec![];
+        if base == name {
+            results.extend(
+                self.functions
+                    .iter()
+                    .enumerate()
+                    .filter(|(i, f)| {
+                        !self.generic_calls.contains_key(i)
+                            && scopes.contains(&f.scope)
+                            && f.name.text == lookup_name
+                            && f.params == arguments
+                    })
+                    .map(|(_, f)| (0, f.result.clone())),
+            );
+        }
         for f in &self.generic_functions {
-            if f.name.text != base || f.arguments.len() != arguments.len() {
+            if !scopes.contains(&f.scope)
+                || f.name.text != lookup_base
+                || f.arguments.len() != arguments.len()
+            {
                 continue;
             }
             let Some(mut bindings) = explicit_bindings(name, &f.parameters) else {
@@ -431,20 +500,22 @@ impl Compiler {
                 .iter()
                 .zip(arguments)
                 .all(|((_, pattern), ty)| unify(&pattern.text, ty, &f.parameters, &mut bindings))
-                && f.infer_requirements(self, depth + 1, budget, None, &mut bindings)?
+                && f.infer_requirements(self, depth + 1, budget, expected, &mut bindings)?
                 && f.parameters.iter().all(|p| bindings.contains_key(&p.text))
             {
-                results.push(
+                results.push((
+                    f.generic_argument_count(),
                     f.result
                         .as_ref()
                         .map_or("Unit".into(), |r| substitute(&r.text, &bindings)),
-                );
+                ));
             }
         }
+        let results = best_candidates(results);
         if results.is_empty()
             && super::ordering::fallback(name).is_some()
             && self
-                .signature_result("__cmp__", arguments, depth + 1, budget)?
+                .signature_result("__cmp__", arguments, origin, depth + 1, budget)?
                 .as_deref()
                 == Some("Ordering")
         {
@@ -458,7 +529,13 @@ impl Compiler {
         {
             for field in fields {
                 if self
-                    .signature_result("__cmp__", &[field.into(), field.into()], depth + 1, budget)?
+                    .signature_result(
+                        "__cmp__",
+                        &[field.into(), field.into()],
+                        origin,
+                        depth + 1,
+                        budget,
+                    )?
                     .as_deref()
                     != Some("Ordering")
                 {
@@ -518,9 +595,13 @@ impl Compiler {
             }
         }
         let base = type_parts(name).map_or(name, |(base, _)| base);
+        let scopes = self.function_scopes(name, &[]);
+        let lookup_name = self.source_function_name(name);
+        let lookup_base = self.source_function_name(base);
         let mut found = false;
         for (id, function) in self.functions.iter().enumerate() {
-            if function.name.text == name
+            if function.name.text == lookup_name
+                && scopes.contains(&function.scope)
                 && function.params.len() == count
                 && !self.generic_calls.contains_key(&id)
             {
@@ -531,7 +612,10 @@ impl Compiler {
             }
         }
         for function in &self.generic_functions {
-            if function.name.text != base || function.arguments.len() != count {
+            if !scopes.contains(&function.scope)
+                || function.name.text != lookup_base
+                || function.arguments.len() != count
+            {
                 continue;
             }
             found = true;
@@ -558,13 +642,20 @@ impl Compiler {
         expected: Option<&str>,
     ) -> BTreeSet<String> {
         let base = type_parts(name).map_or(name, |(base, _)| base);
+        let scopes = self.function_scopes(
+            name,
+            &known.iter().map(|v| v.ty.clone()).collect::<Vec<_>>(),
+        );
         let mut hints = BTreeSet::new();
+        let lookup_name = self.source_function_name(name);
+        let lookup_base = self.source_function_name(base);
         if base == name {
             for (index, f) in self.functions.iter().enumerate() {
                 if self.generic_instances.values().any(|&i| i == index) {
                     continue;
                 }
-                if f.name.text == name
+                if f.name.text == lookup_name
+                    && scopes.contains(&f.scope)
                     && f.params.len() == count
                     && f.params
                         .iter()
@@ -576,7 +667,10 @@ impl Compiler {
             }
         }
         for f in &self.generic_functions {
-            if f.name.text != base || f.arguments.len() != count {
+            if !scopes.contains(&f.scope)
+                || f.name.text != lookup_base
+                || f.arguments.len() != count
+            {
                 continue;
             }
             let Some(mut bindings) = explicit_bindings(name, &f.parameters) else {
@@ -619,11 +713,14 @@ impl Compiler {
         span: &Span,
     ) -> Result<Option<usize>, String> {
         let base = type_parts(name).map_or(name, |(base, _)| base);
-        if base == name {
-            if let Some(index) = self.select(name, args, expected, span)? {
-                return Ok(Some(index));
-            }
-        } else if let Some((_, arguments)) = type_parts(name) {
+        let concrete = if base == name {
+            self.select(name, args, expected, span)?
+        } else {
+            None
+        };
+        if base != name
+            && let Some((_, arguments)) = type_parts(name)
+        {
             for ty in arguments {
                 self.check_type(&Name {
                     text: ty.into(),
@@ -631,8 +728,23 @@ impl Compiler {
                 })?;
             }
         }
-        let Some(selection) = self.select_generic_candidate(name, base, args, expected, span)?
-        else {
+        let selection =
+            self.select_generic_candidate(name, base, args, expected, span, concrete.is_some())?;
+        if let Some(index) = concrete {
+            if let Some(selection) = selection {
+                return Err(ambiguous_call(
+                    name,
+                    span,
+                    false,
+                    [
+                        &self.functions[index].name,
+                        &self.generic_functions[selection.template].name,
+                    ],
+                ));
+            }
+            return Ok(Some(index));
+        }
+        let Some(selection) = selection else {
             return Ok(None);
         };
         self.instantiate_generic(selection, name, args, span)
@@ -645,10 +757,20 @@ impl Compiler {
         args: &[Value],
         expected: Option<&str>,
         span: &Span,
+        concrete: bool,
     ) -> Result<Option<SelectedGeneric>, String> {
         let mut candidates = vec![];
+        let lookup_base = self.source_function_name(base);
+        let scopes =
+            self.function_scopes(name, &args.iter().map(|v| v.ty.clone()).collect::<Vec<_>>());
         for (index, f) in self.generic_functions.iter().enumerate() {
-            if f.name.text != base || f.arguments.len() != args.len() {
+            if !scopes.contains(&f.scope)
+                || f.name.text != lookup_base
+                || f.arguments.len() != args.len()
+            {
+                continue;
+            }
+            if concrete && f.generic_argument_count() != 0 {
                 continue;
             }
             let Some(mut bindings) = explicit_bindings(name, &f.parameters) else {
@@ -662,11 +784,19 @@ impl Compiler {
                     .map_err(|()| span.error("native reference inference limit exceeded"))?
                 && f.parameters.iter().all(|p| bindings.contains_key(&p.text))
             {
-                candidates.push((index, bindings));
+                candidates.push((f.generic_argument_count(), (index, bindings)));
             }
         }
+        let mut candidates = best_candidates(candidates);
         if candidates.len() > 1 {
-            return Err(span.error(format!("ambiguous generic call to '{name}'")));
+            return Err(ambiguous_call(
+                name,
+                span,
+                true,
+                candidates
+                    .iter()
+                    .map(|(index, _)| &self.generic_functions[*index].name),
+            ));
         }
         Ok(candidates
             .pop()
@@ -708,6 +838,7 @@ impl Compiler {
         let index = self.functions.len();
         let cpp = format!("rusk_generic_{index}");
         self.functions.push(Function {
+            scope: definition.scope,
             name: definition.name.clone(),
             params: args.iter().map(|v| v.ty.clone()).collect(),
             result,
@@ -728,7 +859,12 @@ impl Compiler {
         });
         self.generic_instances.insert(key, index);
         self.generic_calls.insert(index, span.clone());
-        self.expand_generic_body(index, &definition, &bindings, name, span)?;
+        self.register_generic_instance_environment(index, template);
+        let parent_scope = self.context.declaration_scope;
+        self.context.declaration_scope = definition.scope;
+        let expanded = self.expand_generic_body(index, &definition, &bindings, name, span);
+        self.context.declaration_scope = parent_scope;
+        expanded?;
         Ok(index)
     }
     fn expand_generic_body(
@@ -832,11 +968,12 @@ fn substitute_reference(name: &mut Name, bindings: &BTreeMap<String, String>) {
 fn substitute_expr(expr: &mut Expr, bindings: &BTreeMap<String, String>) {
     match &mut expr.kind {
         ExprKind::Block(items, tail) => {
+            let bindings = scope_type_bindings(items, bindings);
             for item in items {
-                substitute_statement(item, bindings);
+                substitute_statement(item, &bindings);
             }
             if let Some(tail) = tail {
-                substitute_expr(tail, bindings);
+                substitute_expr(tail, &bindings);
             }
         }
         ExprKind::Match(value, arms) => {
@@ -908,8 +1045,57 @@ fn substitute_expr(expr: &mut Expr, bindings: &BTreeMap<String, String>) {
         ExprKind::Literal(..) | ExprKind::Var(_) => {}
     }
 }
+fn unshadowed_bindings(
+    parameters: &[Name],
+    bindings: &BTreeMap<String, String>,
+) -> BTreeMap<String, String> {
+    bindings
+        .iter()
+        .filter(|(name, _)| !parameters.iter().any(|parameter| &parameter.text == *name))
+        .map(|(name, ty)| (name.clone(), ty.clone()))
+        .collect()
+}
+
+fn scope_type_bindings(
+    statements: &[Stmt],
+    bindings: &BTreeMap<String, String>,
+) -> BTreeMap<String, String> {
+    let parameters = statements
+        .iter()
+        .filter_map(|statement| match statement {
+            Stmt::Struct(name, ..) | Stmt::Enum(name, ..) => Some(name.clone()),
+            _ => None,
+        })
+        .collect::<Vec<_>>();
+    unshadowed_bindings(&parameters, bindings)
+}
+
 fn substitute_statement(stmt: &mut Stmt, bindings: &BTreeMap<String, String>) {
     match stmt {
+        Stmt::Struct(_, parameters, fields) => {
+            let bindings = unshadowed_bindings(parameters, bindings);
+            for (_, ty) in fields {
+                substitute_name(ty, &bindings);
+            }
+        }
+        Stmt::Enum(_, parameters, variants) => {
+            let bindings = unshadowed_bindings(parameters, bindings);
+            for (_, fields) in variants {
+                for ty in fields {
+                    substitute_name(ty, &bindings);
+                }
+            }
+        }
+        Stmt::UserFunction(_, parameters, arguments, result, body) => {
+            let bindings = unshadowed_bindings(parameters, bindings);
+            for (_, ty) in arguments {
+                substitute_name(ty, &bindings);
+            }
+            if let Some(ty) = result {
+                substitute_name(ty, &bindings);
+            }
+            substitute_statement(body, &bindings);
+        }
         Stmt::Let(_, ty, initializer) => {
             if let Some(ty) = ty {
                 substitute_name(ty, bindings);
@@ -934,11 +1120,12 @@ fn substitute_statement(stmt: &mut Stmt, bindings: &BTreeMap<String, String>) {
         }
         Stmt::Expr(expr) | Stmt::Match(expr) => substitute_expr(expr, bindings),
         Stmt::Block(items, tail) => {
+            let bindings = scope_type_bindings(items, bindings);
             for item in items {
-                substitute_statement(item, bindings);
+                substitute_statement(item, &bindings);
             }
             if let Some(tail) = tail {
-                substitute_expr(tail, bindings);
+                substitute_expr(tail, &bindings);
             }
         }
         Stmt::Labeled(_, body) => substitute_statement(body, bindings),

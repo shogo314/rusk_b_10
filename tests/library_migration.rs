@@ -2351,16 +2351,16 @@ let values:=[1];let held:=Some(values,0);held[0]=4;wt values;
         assert_eq!(out.stdout, b"3 7 8 10 12 14\n12 13 14\n4\n");
     }
     for source in [
-        "fn Some<T>(x:T)->Option<T>{return Option::Some(x);}",
-        "fn None<T>()->Option<T>{return Option::None;}",
-        "fn Option<T>()->Option<T>{return Option::None;}",
-        "fn try_read<T>()->Option<T>{return Option::None;}",
+        "fn Some<T>(x:T)->Option<T>{return Option::Some(x);} let x:=Some(1);",
+        "fn None<T>()->Option<T>{return Option::None;} let x:=None::<Int>();",
+        "fn Option<T>()->Option<T>{return Option::None;} let x:=Option::<Int>();",
+        "fn try_read<T>()->Option<T>{return Option::None;} let x:=try_read::<Int>();",
     ] {
         let out = Case::new(source).compile();
         assert!(!out.status.success());
         let error = String::from_utf8_lossy(&out.stderr);
         assert!(
-            error.contains("main.rusk:") && error.contains("duplicate generic function"),
+            error.contains("main.rusk:") && error.contains("ambiguous generic call"),
             "{error}"
         );
     }

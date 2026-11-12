@@ -9,7 +9,9 @@ pub(super) struct Callable {
 
 #[derive(Clone)]
 pub(super) struct CaptureContext {
-    available: BTreeMap<String, Variable>,
+    pub(super) frame: usize,
+    pub(super) available: BTreeMap<String, Variable>,
+    function: Option<usize>,
     captures: Vec<(Name, Variable)>,
     pub(super) locals: BTreeMap<String, Variable>,
     prologue: Body,
@@ -18,12 +20,45 @@ pub(super) struct CaptureContext {
 }
 
 impl Compiler {
+    pub(super) fn begin_named_capture(
+        &mut self,
+        index: usize,
+        available: BTreeMap<String, Variable>,
+    ) {
+        let sources = self.environments.locals[&index].sources.clone();
+        let frame = self.make_capture_frame(available.clone(), sources, Some(index));
+        self.capture_contexts.push(CaptureContext {
+            frame,
+            available,
+            function: Some(index),
+            captures: vec![],
+            locals: BTreeMap::new(),
+            prologue: Body::default(),
+            ty: String::new(),
+            span: self.functions[index].name.span.clone(),
+        });
+    }
+
+    pub(super) fn finish_named_capture(&mut self, index: usize) -> Vec<(Name, Variable)> {
+        let mut capture = self
+            .capture_contexts
+            .pop()
+            .expect("named capture context exists");
+        assert_eq!(capture.function, Some(index));
+        self.finish_capture_frame(capture.frame, index, &capture.locals);
+        if let Some(body) = &mut self.functions[index].checked {
+            capture.prologue.instructions.append(&mut body.instructions);
+            *body = capture.prologue;
+        }
+        capture.captures
+    }
     pub(super) fn local_variable(&self, name: &str) -> Option<Variable> {
         self.context
             .scopes
             .iter()
             .rev()
             .find_map(|s| s.get(name))
+            .filter(|variable| !self.function_shadows_variable(name, variable.scope))
             .cloned()
     }
 
@@ -39,6 +74,9 @@ impl Compiler {
             return Ok(None);
         };
         if let Some(local) = context.locals.get(&name.text).cloned() {
+            if self.function_shadows_variable(&name.text, local.scope) {
+                return Ok(None);
+            }
             if callable_only && !self.callables.contains_key(&local.ty) {
                 return Ok(None);
             }
@@ -48,10 +86,13 @@ impl Compiler {
         let Some(variable) = context.available.get(&name.text).cloned() else {
             return Ok(None);
         };
+        if self.function_shadows_variable(&name.text, variable.scope) {
+            return Ok(None);
+        }
         if callable_only && !self.callables.contains_key(&variable.ty) {
             return Ok(None);
         }
-        if !variable.initialized {
+        if !variable.initialized || variable.ty == crate::ir::hir::DIVERGED {
             return Err(context.span.error(format!(
                 "captured variable '{}' used before initialization",
                 name.text
@@ -65,16 +106,26 @@ impl Compiler {
         };
         let context = self.capture_contexts.last_mut().unwrap();
         context.captures.push((name.clone(), variable.clone()));
-        context.prologue.push(Instruction::Object {
-            result: value.clone(),
-            expression: Rvalue::Field {
-                owner: Value {
-                    id: ValueId::Parameter(0),
-                    ty: env,
+        if let Some(function) = context.function {
+            context.prologue.push(Instruction::Declare {
+                result: value.clone(),
+                initial: Some(Value {
+                    id: ValueId::Parameter(self.functions[function].params.len() + index),
+                    ty: variable.ty.clone(),
+                }),
+            });
+        } else {
+            context.prologue.push(Instruction::Object {
+                result: value.clone(),
+                expression: Rvalue::Field {
+                    owner: Value {
+                        id: ValueId::Parameter(0),
+                        ty: env,
+                    },
+                    index,
                 },
-                index,
-            },
-        });
+            });
+        }
         context.prologue.push(Instruction::DescribeBinding {
             value: value.clone(),
             name: name.clone(),
@@ -93,6 +144,7 @@ impl Compiler {
             });
         }
         let local = Variable {
+            scope: self.context.declaration_scope,
             id: value.id,
             ty: value.ty,
             initialized: true,
@@ -112,17 +164,25 @@ impl Compiler {
         &mut self,
         callee: Value,
         args: Vec<Value>,
+        expected: Option<&str>,
         span: &Span,
     ) -> Result<Value, String> {
         if self.context.diverged {
             return Ok(Value::never());
         }
+        if !self.callables.contains_key(&callee.ty) {
+            return Err(span.error(format!("type '{}' is not callable", callee.ty)));
+        }
 
-        let callable = self
-            .callables
-            .get(&callee.ty)
-            .cloned()
-            .ok_or_else(|| span.error(format!("type '{}' is not callable", callee.ty)))?;
+        let callable = self.specialize_callable(
+            &callee.ty,
+            &args
+                .iter()
+                .map(|value| value.ty.clone())
+                .collect::<Vec<_>>(),
+            expected,
+            span,
+        )?;
         if args.len() != callable.parameters.len() {
             return Err(span.error("callable argument count mismatch"));
         }
@@ -157,11 +217,12 @@ impl Compiler {
             available.extend(scope.clone());
         }
         let key = format!(
-            "{}:{}:{}:{:?}:{:?}:{:?}",
+            "{}:{}:{}:{:?}:{:?}:{:?}:{:?}",
             span.file,
             span.line,
             span.column,
             self.context.current_function,
+            self.context.declaration_scope,
             parameters.iter().map(|(_, t)| &t.text).collect::<Vec<_>>(),
             available
                 .iter()
@@ -188,7 +249,11 @@ impl Compiler {
                     fields: vec![],
                 },
             );
+            let sources = self.visible_capture_sources();
+            let frame = self.make_capture_frame(available.clone(), sources, None);
             self.capture_contexts.push(CaptureContext {
+                frame,
+                function: None,
                 available,
                 captures: vec![],
                 locals: BTreeMap::new(),
@@ -196,7 +261,10 @@ impl Compiler {
                 ty: ty.clone(),
                 span: span.clone(),
             });
-            let lambda_context = FunctionContext::lambda(self.context.current_function);
+            let mut lambda_context = FunctionContext::lambda(self.context.current_function);
+            lambda_context.declaration_scope = self
+                .declaration_scopes
+                .child(self.context.declaration_scope);
             let (checked, completed) = self.with_function_context(lambda_context, |compiler| {
                 for (index, (name, ty)) in parameters.iter().enumerate() {
                     compiler.declare_annotated(
@@ -266,6 +334,9 @@ impl Compiler {
             };
             let index = self.functions.len();
             let f = Function {
+                // The checked body keeps lexical resolution, while the hidden
+                // invocation entry remains callable after its scope has ended.
+                scope: scopes::ScopeId::ROOT,
                 name: Name {
                     text: format!("$invoke{index}"),
                     span: span.clone(),
@@ -293,6 +364,11 @@ impl Compiler {
                 }),
             };
             self.functions.push(f);
+            self.finish_capture_frame(context.frame, index, &context.locals);
+            self.environments.closures.insert(
+                index,
+                local_captures::ClosureLayout::new(ty.clone(), self.records[&ty].fields.len()),
+            );
             self.callables.insert(
                 ty.clone(),
                 Callable {
@@ -304,13 +380,15 @@ impl Compiler {
             self.lambda_types.insert(key, ty.clone());
             ty
         };
-        let fields = self.records[&ty].fields.clone();
+        let function = self.callables[&ty].function;
+        let fields =
+            self.records[&ty].fields[..self.environments.closures[&function].base_fields].to_vec();
         let mut values = vec![];
         for (name, _) in fields {
             let variable = self
                 .lookup_variable(&name, false)?
                 .ok_or_else(|| name.span.error("missing captured variable"))?;
-            if !variable.initialized {
+            if !variable.initialized || variable.ty == crate::ir::hir::DIVERGED {
                 return Err(name.span.error(format!(
                     "captured variable '{}' used before initialization",
                     name.text
@@ -321,65 +399,11 @@ impl Compiler {
                 ty: variable.ty,
             });
         }
-        Ok(self.emit(&ty, Rvalue::Aggregate(values)))
+        Ok(self.construct_callable(&ty, values, span))
     }
 
     pub(super) fn function_value(&mut self, name: &Name) -> Result<Value, String> {
-        let candidates = self
-            .functions
-            .iter()
-            .enumerate()
-            .filter(|(i, f)| f.name.text == name.text && !self.generic_calls.contains_key(i))
-            .map(|(i, _)| i)
-            .collect::<Vec<_>>();
-        if candidates.len() != 1 {
-            return Err(name.span.error(if candidates.is_empty() {
-                format!("unknown variable or concrete function '{}'", name.text)
-            } else {
-                format!(
-                    "passing overloaded function '{}' is not supported",
-                    name.text
-                )
-            }));
-        }
-        let index = candidates[0];
-        if let Some(ty) = self.function_types.get(&index).cloned() {
-            return Ok(self.emit(&ty, Rvalue::Aggregate(vec![])));
-        }
-        let f = self.functions[index].clone();
-        let parameters = f
-            .params
-            .iter()
-            .enumerate()
-            .map(|(i, ty)| {
-                (
-                    DeclaredName::plain(Name {
-                        text: format!("$argument{i}"),
-                        span: name.span.clone(),
-                    }),
-                    Name {
-                        text: ty.clone(),
-                        span: name.span.clone(),
-                    },
-                )
-            })
-            .collect::<Vec<_>>();
-        let expr = Expr {
-            span: name.span.clone(),
-            kind: ExprKind::Call(
-                name.clone(),
-                parameters
-                    .iter()
-                    .map(|(n, _)| Expr {
-                        kind: ExprKind::Var(n.name.clone()),
-                        span: n.span.clone(),
-                    })
-                    .collect(),
-            ),
-        };
-        let value = self.lambda(&parameters, &expr, &name.span)?;
-        self.function_types.insert(index, value.ty.clone());
-        Ok(value)
+        self.family_value(name)
     }
 }
 
@@ -388,22 +412,19 @@ impl Compiler {
         &mut self,
         callee: Value,
         args: &[Expr],
+        expected: Option<&str>,
         span: &Span,
     ) -> Result<Value, String> {
         if self.context.diverged {
             return Ok(Value::never());
         }
 
-        let info = self
-            .callables
-            .get(&callee.ty)
-            .cloned()
-            .ok_or_else(|| span.error(format!("type '{}' is not callable", callee.ty)))?;
         let mut values = vec![];
-        for (index, arg) in args.iter().enumerate() {
-            values.push(self.expr(arg, info.parameters.get(index).map(String::as_str))?);
+        for arg in args {
+            let hint = self.callable_argument_hint(&callee.ty, args.len(), &values, expected);
+            values.push(self.expr(arg, hint.as_deref())?);
         }
-        self.invoke(callee, values, span)
+        self.invoke(callee, values, expected, span)
     }
     pub(super) fn invoke_expression(
         &mut self,
@@ -419,7 +440,7 @@ impl Compiler {
                 && self.callables.contains_key(&ty)
             {
                 let field = self.emit(&ty, Rvalue::Field { owner, index });
-                return self.invoke_arguments(field, args, span);
+                return self.invoke_arguments(field, args, expected, span);
             }
             if self
                 .lookup_variable(name, true)?
@@ -432,16 +453,17 @@ impl Compiler {
                     },
                     None,
                 )?;
-                let info =
-                    self.callables.get(&function.ty).cloned().ok_or_else(|| {
-                        span.error("method name refers to a non-callable variable")
-                    })?;
                 let mut values = vec![owner];
-                for (index, arg) in args.iter().enumerate() {
-                    values
-                        .push(self.expr(arg, info.parameters.get(index + 1).map(String::as_str))?);
+                for arg in args {
+                    let hint = self.callable_argument_hint(
+                        &function.ty,
+                        args.len() + 1,
+                        &values,
+                        expected,
+                    );
+                    values.push(self.expr(arg, hint.as_deref())?);
                 }
-                return self.invoke(function, values, span);
+                return self.invoke(function, values, expected, span);
             }
             let mut values = vec![owner];
             for arg in args {
@@ -456,6 +478,6 @@ impl Compiler {
             return self.call(&name.text, values, expected, span);
         }
         let callee = self.expr(callee, None)?;
-        self.invoke_arguments(callee, args, span)
+        self.invoke_arguments(callee, args, expected, span)
     }
 }

@@ -170,6 +170,10 @@ pub(crate) enum Type {
     Scalar(Scalar),
     Buffer(String),
     Record(Vec<(String, String)>),
+    FunctionFamily {
+        fields: Vec<(String, String)>,
+        functions: Vec<FunctionId>,
+    },
     Callable {
         fields: Vec<(String, String)>,
         function: FunctionId,
@@ -209,7 +213,9 @@ impl Type {
     }
     pub fn fields(&self) -> Option<&[(String, String)]> {
         match self {
-            Self::Record(fields) | Self::Callable { fields, .. } => Some(fields),
+            Self::Record(fields)
+            | Self::Callable { fields, .. }
+            | Self::FunctionFamily { fields, .. } => Some(fields),
             _ => None,
         }
     }

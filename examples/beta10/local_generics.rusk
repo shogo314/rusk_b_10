@@ -1,0 +1,62 @@
+//! ジェネリックなローカル関数でも、捕捉先は宣言時点で決まる。
+{
+    let count := 1;
+    fn paired<T>(value: T) -> (T, Int) {
+        return (value, count);
+    }
+    count = 2;
+    let a := paired(3);
+    let b := paired("a");
+    wt a[0], a[1], b[0], b[1];
+    count := 9;
+    let old := paired(4);
+    wt old[1], count;
+} {
+    let count := 0;
+    fn even<T>(value: T, depth: Int) -> Int {
+        count += 1;
+        if depth == 0 {
+            return count;
+        }
+        return odd(value, depth - 1);
+    }
+    fn odd<T>(value: T, depth: Int) -> Int {
+        count += 1;
+        if depth == 0 {
+            return count;
+        }
+        return even(value, depth - 1);
+    }
+    wt even(0, 3), odd("a", 0), count;
+}
+
+let text := "ab";
+{
+    let first := text[0];
+    let read := () => {
+        fn get<T>(unused: T) -> Char {
+            return first;
+        }
+        get(0)
+    };
+    let independent = read;
+    read() = 'Z';
+    wt read(), independent();
+}
+text.push_back('!');
+wt text;
+
+// 同じ宣言の具体化は、コピーした環境の中でも状態を共有する。
+let operation := {
+    let count := 0;
+    fn next<T>(unused: T) -> Int {
+        count += 1;
+        return count;
+    }() => {
+        let a = next(0);
+        let b = next("a");
+        (a, b)
+    }
+};
+let detached = operation;
+wt detached(), operation();

@@ -89,7 +89,7 @@ fn invalid_records_are_diagnosed_before_cpp() {
         "struct X { next:X; }",
         "struct X { children:Vec<X>; }",
         "struct X { other:Y; } struct Y { other:X; }",
-        "fn f() { struct X { value:Int; } }",
+        "fn f() { struct X { value:Missing; } }",
         "struct X { value:Int; } let x:=X { value:1 }; wt x==x;",
         "struct X { value:Int; } let x:=[X { value:1 }]; x.sort();",
     ] {

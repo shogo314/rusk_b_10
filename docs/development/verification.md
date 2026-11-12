@@ -54,6 +54,7 @@ RUSK_TEST_NO_OPT=1 cargo test --locked --test documentation
 | 共有・コピー・型・関数・構造 | `e2e`、`records`、`tuples`、`generics`、`includes`、`enums` |
 | 制御・パターン・最小最大 | `blocks_labels`、`beta05`、`beta06`、`minmax` |
 | 関数値・走査・データ構造 | `callables`、`higher_order`、`data_structures`、`beta04_structures` |
+| ローカル宣言・名前探索・候補群 | `local_functions`、`local_generics`、`local_types`、`native_captures`、`function_families`、`overloads` |
 | extern・標準宣言・ABI・信頼元 | `extern_generics`、`extern_callbacks`、`library_migration` |
 | IR・効果・契約・診断経路 | `pipeline`、`effects`、`bindings`、`readonly`、`noescape`、各`*_routes`、`heap_aliases` |
 | 最適化の意味と確保数 | `optimization`、`effect_optimization` |
@@ -61,6 +62,8 @@ RUSK_TEST_NO_OPT=1 cargo test --locked --test documentation
 | 文書から直接読む例 | `documentation`、`extern_generics`、`api` |
 
 ファイル名に残る版名は既存のテスト対象名です。現在の仕様を版ごとに分ける意味ではありません。内部の不正なIR・効果合成・具体化などは、対応するソースモジュールの単体テストでも検証します。
+
+ローカル宣言・捕捉・関数候補群と、数値以外の走査・比較・集計の追加テストでは、各テスト内で通常と`--no-opt`の実行結果を照合します。これらを共通入口の最適化無効段階でも重複して実行する必要はありません。`overloads`は共通入口の両段階で実行します。
 
 ## サニタイザー
 

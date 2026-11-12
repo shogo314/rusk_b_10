@@ -9,6 +9,10 @@ impl Compiler {
                 self.compile_function(i)?;
             }
         }
+        // Executable top-level bindings live in main, inside the declaration
+        // root. They may shadow library functions without becoming captures of
+        // top-level named functions.
+        self.context.declaration_scope = self.declaration_scopes.child(scopes::ScopeId::ROOT);
         self.context.scopes.push(BTreeMap::new());
         for source in sources {
             for s in source {
@@ -19,6 +23,12 @@ impl Compiler {
         self.context.diverged = false;
         self.complete_instantiations()?;
         self.context.body = main_body;
+        while self.prepare_capture_layouts()? {
+            let main_body = std::mem::take(&mut self.context.body);
+            let result = self.complete_instantiations();
+            self.context.body = main_body;
+            result?;
+        }
         self.context.body.push(Instruction::Return {
             value: None,
             span: None,
@@ -42,7 +52,11 @@ impl Compiler {
                                 .map(|((template, arguments), _)| format!(
                                     "{}<{}>",
                                     self.generic_functions[*template].name.text,
-                                    arguments.join(",")
+                                    arguments
+                                        .iter()
+                                        .map(|argument| self.diagnostic_type(argument))
+                                        .collect::<Vec<_>>()
+                                        .join(",")
                                 ))
                                 .unwrap_or_else(|| self.functions[index].name.text.clone()),
                             span.file,
@@ -78,29 +92,42 @@ impl Compiler {
         }
         Ok(())
     }
-    pub(super) fn build_hir(&mut self) -> crate::ir::hir::Program {
+    pub(super) fn build_hir(&mut self) -> Result<crate::ir::hir::Program, String> {
         let mut hir = crate::ir::hir::Program {
             types: self.ir_types(),
             functions: self
                 .functions
                 .iter()
                 .enumerate()
-                .map(|(id, f)| crate::ir::hir::Function {
-                    id,
-                    name: f.name.text.clone(),
-                    params: f.params.clone(),
-                    result: f.result.clone(),
-                    body: f.checked.clone(),
-                    access: crate::analysis::readonly::Summary::default(),
-                    effects: self.native_contract(id).cloned().unwrap_or_else(|| {
-                        crate::analysis::effects::Summary::unanalyzed(f.params.len())
-                    }),
+                .map(|(id, f)| {
+                    Ok(crate::ir::hir::Function {
+                        id,
+                        name: f.name.text.clone(),
+                        params: f
+                            .params
+                            .iter()
+                            .cloned()
+                            .chain(self.capture_parameters(id))
+                            .collect(),
+                        result: f.result.clone(),
+                        body: f
+                            .checked
+                            .as_ref()
+                            .map(|body| self.convert_capture_body(body, Some(id)))
+                            .transpose()?,
+                        access: crate::analysis::readonly::Summary::default(),
+                        effects: self.native_environment_contract(id).unwrap_or_else(|| {
+                            crate::analysis::effects::Summary::unanalyzed(
+                                f.params.len() + self.capture_parameters(id).len(),
+                            )
+                        }),
+                    })
                 })
-                .collect(),
-            main: std::mem::take(&mut self.context.body),
+                .collect::<Result<Vec<_>, String>>()?,
+            main: self.convert_capture_body(&self.context.body, None)?,
         };
         hir.prune_unreachable();
-        hir
+        Ok(hir)
     }
     pub(super) fn analyze_program(
         &self,
@@ -111,7 +138,9 @@ impl Compiler {
             .native_info
             .iter()
             .filter_map(|(&id, info)| {
-                info.dependencies.as_ref()?;
+                if info.dependencies.is_none() && self.capture_parameters(id).is_empty() {
+                    return None;
+                }
                 let contract = info.contract.as_ref()?;
                 (contract.source == crate::analysis::effects::SummarySource::NativeContract)
                     .then_some(id)
@@ -162,27 +191,7 @@ impl Compiler {
                 .iter()
                 .copied()
                 .filter_map(|id| {
-                    let base = self
-                        .native_contract(id)
-                        .expect("conditional native contract");
-                    if !self
-                        .native_dependencies(id)
-                        .expect("conditional native dependencies")
-                        .iter()
-                        .all(|dependency| {
-                            crate::native::effects::dependency_covered(
-                                base,
-                                &summaries[*dependency],
-                            )
-                        })
-                    {
-                        return None;
-                    }
-                    let composed = crate::native::effects::composition::compose(
-                        base,
-                        self.native_mappings(id),
-                        &summaries,
-                    )?;
+                    let composed = self.compose_native_environment_contract(id, &summaries)?;
                     Some((id, composed))
                 })
                 .collect::<Vec<_>>();
